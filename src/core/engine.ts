@@ -29,6 +29,16 @@ export interface SimConfig {
   /** 是否記錄排程器函式呼叫 */
   trace?: boolean;
   traceLimit?: number;
+  /** 旁觀者（例如 GPS 影子參考），每段連續執行區間結束時被通知 */
+  observers?: SimObserver[];
+}
+
+/**
+ * 觀察模擬的旁觀者。不參與排程決策。
+ * [t0, t1) 之間 curr 與 runnable 集合都不變（事件之間是連續執行）。
+ */
+export interface SimObserver {
+  onAdvance(t0: Ns, t1: Ns, curr: Task<unknown> | null, runnable: readonly Task<unknown>[]): void;
 }
 
 /** 每個 task 的統計，由引擎自己記，不依賴排程器的 schedstats */
@@ -199,6 +209,12 @@ export class Simulator<SE> {
   private advance(t: Ns): void {
     const dt = t - this.rq.clock;
     const curr = this.rq.curr;
+    const obs = this.cfg.observers;
+    if (obs?.length && dt > 0) {
+      // TASK_RUNNING = curr + 在 runqueue 上等的 task
+      const runnable = this.tasks.filter((p) => p.state === 'RUNNING');
+      for (const o of obs) o.onAdvance(this.rq.clock, t, curr, runnable);
+    }
     if (curr) {
       curr.burstLeft -= dt;
       this.bk(curr).stats.runtime += dt;

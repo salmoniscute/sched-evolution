@@ -44,6 +44,19 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
 - 對照資料用一份 JSON 對應「模擬步驟 → 版本 / 檔案 / 函式 / 行號 / 說明」。
 - 授權：專案內含 kernel 程式碼片段，因此整個專案用 GPL-2.0。
 
+## 數學說明：理論與實作的差異
+
+重點是說明**理論模型（論文）和 kernel 實作的落差**，以及 kernel 為什麼這樣取捨，不只是列公式。
+
+- 做法：每個排程器對照**它自己的理想參考**，同一組工作負載並排跑，把落差畫出來（V 的軌跡、各 task 的 lag、搶占時間點）：
+  - CFS v2.6.24 → GPS 流體模型（每個 task 依權重同時獲得服務）。
+  - EEVDF v6.6 / v6.12 → 兩層：GPS 流體模型定義 lag（S − s_i），論文的離散 EEVDF（精確的 V、任意時間點可搶占、request 大小 r_i）定義「理想演算法」。kernel 對論文演算法的差異是重點；論文演算法對流體模型的差異就是論文證明的 lag 上下界。v6.12 的 custom slice 對應論文中不同大小的 request。
+  - O(1) / O(n) → 沒有比例分享的理論模型，本質是優先權 + 時間片的啟發式。仍可拿 GPS（nice 換算 CFS 權重）對照「離比例分享多遠」，但介面上要標明這不是它們的設計目標。
+- 演進故事線：v2.6.23 用 `wait_runtime` 直接記錄「應得 − 實得」（也就是 lag，並截斷在 ±limit）；v2.6.24 改成 `vruntime`，lag 不再明確存在；v6.6 EEVDF 又把 lag（`vlag`）正式帶回來，同樣有截斷。v2.6.23 只在歷史說明中提，不實作。
+- 每一項差異標出處：kernel 註解（抽取腳本，附行號）或論文（書目 + 章節，推導用自己的話重寫）。引用哪些論文由作者決定。
+- 已知的差異（EEVDF v6.6）：V 用加權平均近似，只有在 lag = 0 時加入／離開才等於理想值（`avg_vruntime` 註解的 NOTE）；lag 被強制截斷在 max(2×slice, TICK)，論文的上下界是推導出來的；加入時要放大 lag `(W + w_i)/W`；tick 粒度讓 0.75ms slice 實際上變成 1ms；`RUN_TO_PARITY` 讓 curr 跑完 slice 才讓位；整數運算的截斷與偏左取整；fork 的半 slice 放置被覆蓋。
+- 已知的差異（CFS v2.6.24）：沒有 lag 概念，`min_vruntime` 不是理想的 V；喚醒時 `vruntime -= sysctl_sched_latency` 給睡眠者補償（睡太久的則失去應得的服務）；`START_DEBIT` 讓新 task 先欠一段。
+
 ## 比較情境
 
 1. 大量 task：O(n) 每次排程的成本線性上升
@@ -71,6 +84,10 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 發現：v6.6 的 `PLACE_DEADLINE_INITIAL` 實際上沒作用（fork 時的放置被 `activate_task` 覆蓋），v6.12 才修正。
   - 比較情境要用不對齊 tick 的時間，否則會出現人造的 deadline 平手。
   - 下一步：v6.12 選項（`custom_slice` + `PREEMPT_SHORT`），做比較情境 4。
+- 2026-11-16：GPS 流體參考（`src/ref/gps.ts`）。`GpsShadow` 透過引擎新增的 `observers` 跟著真實排程器算 lag；`simulateGps` 是獨立的理想模擬。筆記見 `notes/04-gps-reference.md`。
+  - 發現：EEVDF v6.6 的 lag 符合論文上下界，但 r 要用被 tick 放大的 1ms，不是名目 slice 0.75ms。
+  - 發現：CFS v2.6.24 的喚醒補償讓互動型 task 相對 GPS 的 lag 線性累積（editor + 2 compile，1 秒 −75.6ms）；EEVDF 有界，但 editor 要等。
+  - 下一步：v6.12 選項，接著論文版的離散 EEVDF 參考。
 
 ## 指令
 
