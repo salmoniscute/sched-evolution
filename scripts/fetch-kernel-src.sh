@@ -19,6 +19,12 @@ FILES=(
   "v6.6    kernel/sched/sched.h"
   "v6.6    kernel/sched/features.h"   # PLACE_LAG / RUN_TO_PARITY 等預設值
   "v6.6    include/linux/sched.h"     # struct sched_entity（deadline / vlag / slice）
+  "v6.12   kernel/sched/fair.c"       # custom_slice、PREEMPT_SHORT、DELAY_DEQUEUE
+  "v6.12   kernel/sched/core.c"       # wake_up_new_task 的 ENQUEUE_INITIAL、__setscheduler_params
+  "v6.12   kernel/sched/syscalls.c"   # sched_attr.sched_runtime → se.slice
+  "v6.12   kernel/sched/sched.h"
+  "v6.12   kernel/sched/features.h"
+  "v6.12   include/linux/sched.h"     # struct sched_entity（custom_slice / min_slice）
 )
 
 for entry in "${FILES[@]}"; do

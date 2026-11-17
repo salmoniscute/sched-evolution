@@ -3,6 +3,7 @@ import { summarize } from '../src/core/metrics.ts';
 import { NSEC_PER_SEC, type SchedClass, type TaskSpec } from '../src/core/types.ts';
 import { CfsV2_6_24 } from '../src/sched/cfs-v2.6.24.ts';
 import { EevdfV6_6 } from '../src/sched/eevdf-v6.6.ts';
+import { EevdfV6_12 } from '../src/sched/eevdf-v6.12.ts';
 
 export const hog = (name: string, nice = 0, arrival = 0): TaskSpec => ({
   name,
@@ -26,4 +27,5 @@ export function run<S extends SchedClass<any>>(
 export const schedulers: [string, () => SchedClass<any>][] = [
   ['cfs-v2.6.24', () => new CfsV2_6_24()],
   ['eevdf-v6.6', () => new EevdfV6_6()],
+  ['eevdf-v6.12-slice', () => new EevdfV6_12()],
 ];

@@ -55,6 +55,10 @@ export interface SchedEntity {
   vlag: Ns;
   /** request size r_i */
   slice: Ns;
+  /** v6.12 才有：sched_attr.sched_runtime 指定了自訂 slice。v6.6 恆為 false。 */
+  custom_slice: boolean;
+  /** v6.12 才有（DELAY_DEQUEUE）：已經睡著，但還留在 runqueue 上把負的 lag 還完。v6.6 恆為 false。 */
+  sched_delayed: boolean;
   readonly task: Task<SchedEntity>;
 }
 
@@ -81,6 +85,8 @@ export interface EntityView {
   vlag: Ns;
   /** 目前是否 eligible（lag ≥ 0） */
   eligible: boolean;
+  /** v6.12 DELAY_DEQUEUE：睡著但還在樹上 */
+  sched_delayed: boolean;
   sum_exec_runtime: Ns;
 }
 
@@ -197,6 +203,8 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
       vruntime: 0,
       vlag: 0,
       slice: this.tun.sysctl_sched_base_slice,
+      custom_slice: false,
+      sched_delayed: false,
       task: p,
     };
   }
@@ -248,7 +256,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
   }
 
   /** update_entity_lag()（:710）：vlag = V − v_i，限制在 ±max(2·slice, TICK) 換成虛擬時間 */
-  private update_entity_lag(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
+  protected update_entity_lag(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
     const lag = this.avg_vruntime(cfs_rq) - se.vruntime;
     const limit = calc_delta_fair(Math.max(2 * se.slice, rq.tick_nsec), se);
     se.vlag = clamp(lag, -limit, limit);
@@ -303,14 +311,14 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
   // ---- tree 操作 --------------------------------------------------------
 
   /** __enqueue_entity()（:831） */
-  private __enqueue_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
+  protected __enqueue_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
     this.avg_vruntime_add(cfs_rq, se);
     rq.ops += cfs_rq.tasks_timeline.depth();
     cfs_rq.tasks_timeline.insert(se);
   }
 
   /** __dequeue_entity()（:839） */
-  private __dequeue_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
+  protected __dequeue_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
     rq.ops += cfs_rq.tasks_timeline.depth();
     cfs_rq.tasks_timeline.remove(se);
     this.avg_vruntime_sub(cfs_rq, se);
@@ -386,7 +394,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
   }
 
   /** update_curr()（:1150） */
-  private update_curr(rq: Rq<SchedEntity>, cfs_rq: CfsRq): void {
+  protected update_curr(rq: Rq<SchedEntity>, cfs_rq: CfsRq): void {
     const curr = cfs_rq.curr;
     if (!curr) return;
     const now = rq.clock;
@@ -405,7 +413,16 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
     });
     this.update_deadline(rq, cfs_rq, curr);
     this.update_min_vruntime(cfs_rq);
+    if (cfs_rq.nr_running > 1 && this.did_preempt_short(cfs_rq, curr)) resched_task(rq);
   }
+
+  /** v6.12 的 PREEMPT_SHORT 掛勾（update_curr 內）；v6.6 沒有 */
+  protected did_preempt_short(_cfs_rq: CfsRq, _curr: SchedEntity): boolean {
+    return false;
+  }
+
+  /** v6.12 的 PREEMPT_SHORT 掛勾（check_preempt_wakeup 內，pick 之前）；v6.6 沒有 */
+  protected wakeup_preempt_short(_rq: Rq<SchedEntity>, _cfs_rq: CfsRq, _pse: SchedEntity, _se: SchedEntity): void {}
 
   // ---- 進出 runqueue ----------------------------------------------------
 
@@ -413,7 +430,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
    * place_entity()（:4974）：保留 lag 的放置。
    * v_i = V − vl_i · (W + w_i) / W，補償新 entity 加入後對 V 的影響（推導見原始碼註解）。
    */
-  private place_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity, flags: number): void {
+  protected place_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity, flags: number): void {
     const vruntime = this.avg_vruntime(cfs_rq);
     let lag = 0;
 
@@ -477,7 +494,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
   }
 
   /** dequeue_entity()（:5167） */
-  private dequeue_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
+  protected dequeue_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
     this.update_curr(rq, cfs_rq);
     this.update_entity_lag(rq, cfs_rq, se);
     if (se !== cfs_rq.curr) this.__dequeue_entity(rq, cfs_rq, se);
@@ -489,7 +506,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
   }
 
   /** set_next_entity()（:5220） */
-  private set_next_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
+  protected set_next_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
     if (se.on_rq) {
       this.__dequeue_entity(rq, cfs_rq, se);
       // HACK：把選中當下的 deadline 暫存在 vlag（dequeue 之前不會用到 vlag）。
@@ -502,7 +519,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
   }
 
   /** pick_next_entity()（:5270）：NEXT_BUDDY 預設關，等同 pick_eevdf */
-  private pick_next_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq): SchedEntity | null {
+  protected pick_next_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq): SchedEntity | null {
     return this.pick_eevdf(rq, cfs_rq);
   }
 
@@ -550,6 +567,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
 
     const cfs_rq = this.cfs_rq;
     this.update_curr(rq, cfs_rq);
+    this.wakeup_preempt_short(rq, cfs_rq, pse, se);
     const picked = this.pick_eevdf(rq, cfs_rq);
     const preempt = picked === pse;
     rq.trace.log(rq.clock, 'check_preempt_wakeup', p.pid, {
@@ -611,6 +629,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
       deadline: se.deadline,
       vlag: se.vlag,
       eligible: this.entity_eligible(c, se),
+      sched_delayed: se.sched_delayed,
       sum_exec_runtime: se.sum_exec_runtime,
     });
     return {

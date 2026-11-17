@@ -18,7 +18,7 @@
 | O(1) | 2.6.0 | `kernel/sched.c` | `prio_array`、`sched_find_first_bit()`、active/expired 交換、`effective_prio()` / sleep_avg |
 | CFS | v2.6.24 | `kernel/sched_fair.c`（權重表 `prio_to_weight[]` 在 `kernel/sched.c`） | `update_curr()`、`__pick_next_entity()`、`place_entity()`、`sched_slice()` |
 | EEVDF | v6.6 | `kernel/sched/fair.c` | `pick_eevdf()`、`entity_eligible()`、`update_deadline()`、`place_entity()`（lag） |
-| EEVDF 選項 | v6.12 | `kernel/sched/fair.c` | 只移植 `custom_slice` + `PREEMPT_SHORT`（給比較情境 4），不做 `DELAY_DEQUEUE` |
+| EEVDF 選項 | v6.12 | `kernel/sched/fair.c` | 移植 `custom_slice`、`PREEMPT_SHORT`、`DELAY_DEQUEUE` + `DELAY_ZERO`（給比較情境 4；沒有 DELAY_DEQUEUE 短 slice 無效）、fork 的 `ENQUEUE_INITIAL` |
 | sched_ext | 6.12 | — | 只當結尾介紹，不實作 |
 
 RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 的初版 CFS（`fair_clock` / `wait_runtime`）也只在歷史說明中提到。
@@ -88,6 +88,10 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 發現：EEVDF v6.6 的 lag 符合論文上下界，但 r 要用被 tick 放大的 1ms，不是名目 slice 0.75ms。
   - 發現：CFS v2.6.24 的喚醒補償讓互動型 task 相對 GPS 的 lag 線性累積（editor + 2 compile，1 秒 −75.6ms）；EEVDF 有界，但 editor 要等。
   - 下一步：v6.12 選項，接著論文版的離散 EEVDF 參考。
+- 2026-11-16：EEVDF v6.12 選項（`src/sched/eevdf-v6.12.ts`），比較情境 4 測試在 `test/eevdf-v6.12.test.ts`。筆記見 `notes/05-eevdf-v6.12-slice.md`。
+  - 發現：只移植 `custom_slice` + `PREEMPT_SHORT` 時短 slice 無效（audio 帶負 lag 醒來、不 eligible）。改變範圍決定，加入 `DELAY_DEQUEUE` + `DELAY_ZERO` 後 audio 喚醒延遲從 620µs 降到 ~0。
+  - 發現：以 GPS（睡眠時 lag 凍結）來看，DELAY_DEQUEUE 等於原諒睡眠期間的負 lag，audio 拿到 6.15%（GPS 5.49%）。
+  - 下一步：前端（目前還沒有網頁）。
 
 ## 指令
 
