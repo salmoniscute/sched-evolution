@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>排程器演進模擬</title>
+    <link rel="stylesheet" href="/src/ui/style.css" />
+  </head>
+  <body>
+    <div class="topbar">
+      <div class="topbar-inner">
+        <nav>
+          <span class="brand">排程器演進</span>
+          <a href="#/sim" data-page="sim">模擬</a>
+          <a href="#/concepts" data-page="concepts">概念：lag 與 GPS</a>
+          <a href="#/source" data-page="source">原始碼</a>
+        </nav>
+        <div class="controls" data-for="sim">
+          <label>情境 <select id="scenario"></select></label>
+          <label>寬度
+            <select id="width">
+              <option value="10">10 ms</option>
+              <option value="20">20 ms</option>
+              <option value="50" selected>50 ms</option>
+              <option value="200">200 ms</option>
+              <option value="2000">2 s</option>
+            </select>
+          </label>
+          <label class="grow">起點 <input id="start" type="range" min="0" max="1950" step="1" value="100" /> <output id="startOut"></output></label>
+        </div>
+      </div>
+    </div>
+
+    <section class="page" id="page-sim">
+      <details class="card scenario" id="scenarioCard"></details>
+      <main id="panels"></main>
+      <section id="results" class="card results"></section>
+    </section>
+
+    <section class="page" id="page-concepts" hidden>
+      <article class="card explain">
+        <h2>怎麼看模擬頁的圖</h2>
+        <ul>
+          <li>時間軸每一列是一個程式。深色是它正在用 CPU，淺色是它醒著、想跑，但 CPU 被別人佔著。只有一顆 CPU，所以任何時刻最多一列是深色。</li>
+          <li>表格裡「CPU 比例」是 2 秒內實際拿到的時間比例，「GPS 比例」是同一組程式在理想公平的情況下該拿到的比例。「喚醒延遲」是醒來到真的開始跑之間等了多久。</li>
+          <li>滑鼠停在圖上會顯示那一刻每個程式的 lag。上方的拖拉條可以換時段，寬度開到 2 秒可以看長期趨勢。</li>
+        </ul>
+        <h2>lag 是什麼，怎麼算</h2>
+
+
+      <h3>理想的參考：GPS</h3>
+      <p>
+        比例分享排程的理論起點是 GPS（Generalized Processor Sharing）。它假設 CPU 可以像水流一樣同時分給所有想跑的程式：
+        程式 <var>i</var> 的權重是 <var>w<sub>i</sub></var>（nice 0 是 1024，nice 每差 1 大約差 1.25 倍），
+        某一刻所有想跑的程式權重加起來是 <var>W</var>，那 <var>i</var> 這一刻拿到的速度就是 <var>w<sub>i</sub></var> / <var>W</var>。
+        三個 nice 0 的程式都想跑時，每個同時以 1/3 的速度前進。真的 CPU 做不到這件事，一次只能跑一個，所以 GPS 只拿來當尺。
+      </p>
+
+      <h3>定義</h3>
+      <p>
+        從開始到某一刻，GPS 會給程式 <var>i</var> 的 CPU 時間記為 <var>S<sub>i</sub></var>，真實排程器實際給的記為 <var>s<sub>i</sub></var>。
+        lag<sub>i</sub> = <var>S<sub>i</sub></var> − <var>s<sub>i</sub></var>。正的表示排程器欠它，負的表示它拿超過了。圖上的單位是時間（µs、ms）。
+      </p>
+
+      <h3>例子</h3>
+      <p>
+        audio、cc1、cc2 三個都是 nice 0，同時醒著。排程器讓 cc1 連續跑 1ms。這 1ms 裡 GPS 會給每個人 1/3ms，
+        所以 1ms 後 cc1 的 lag 是 1/3 − 1 = −2/3ms，audio 和 cc2 各是 +1/3ms。三個加起來是 0。
+      </p>
+
+      <h3>為什麼圖是鋸齒</h3>
+      <p>
+        把上面的例子換成速率：正在跑的程式每過 1ms，lag 下降 1 − <var>w<sub>i</sub></var>/<var>W</var>；在排隊的程式每過 1ms，lag 上升 <var>w<sub>i</sub></var>/<var>W</var>。
+        三個 nice 0 時就是跑的那個以 2/3 的斜率往下，等的兩個以 1/3 往上。換人跑，斜率就翻過來，所以每條線都是一段一段的折線。
+        鋸齒的高度取決於排程器一次讓一個程式連續跑多久：兩個 nice 0 的 hog 在 CFS v2.6.24 下一次跑約 10ms，lag 在 ±5.5ms 之間擺；
+        EEVDF 每 1ms 換一次，只擺 ±0.5ms。EEVDF 論文證明 lag 的上下界和 request 大小有關（−r<sub>max</sub> &lt; lag &lt; max(r<sub>max</sub>, q)），
+        模擬裡實際的 request 被 1ms 的 tick 放大成 1ms，量到的 lag 都在 ±1ms 內。
+      </p>
+
+      <h3>加起來永遠是 0</h3>
+      <p>
+        只要有程式想跑，真實排程器和 GPS 都不會讓 CPU 閒著，所以同一段時間兩邊發出去的 CPU 總量一樣多。
+        有人多拿，一定有人少拿。所以看圖時不能只看一條線：audio 往下多少，cc1 和 cc2 合起來就往上多少。
+        要分辨的是一時的鋸齒和長期的漂移。一條線如果一路往下、沒有回來，表示那個程式長期拿得比公平的份多。
+      </p>
+
+      <h3>和 kernel 的對應</h3>
+      <p>
+        v6.6 <code>kernel/sched/fair.c</code> 的註解寫的就是這個定義：lag<sub>i</sub> = S − s<sub>i</sub> = w<sub>i</sub> · (V − v<sub>i</sub>)。
+        <var>v<sub>i</sub></var> 是程式的 vruntime（實際執行時間除以權重，以 nice 0 為單位），<var>V</var> 是 GPS 的虛擬時間。
+        EEVDF 只允許 lag ≥ 0（也就是 V ≥ v<sub>i</sub>）的程式被選，叫做 eligible，然後在這些程式裡挑 deadline 最早的。
+        差別在 V 的算法：kernel 沒有真的跑一個 GPS，而是拿所有 vruntime 的加權平均當作 V。註解自己也寫了，只有程式都在 lag = 0 時進出，這兩者才相等。
+        網頁上的 lag 是另外照定義算的 GPS，不是 kernel 的 <code>vlag</code>，所以可以拿來檢查 kernel 的近似差多少。
+      </p>
+
+      <h3>睡覺的時候怎麼算</h3>
+      <p>
+        程式睡覺時不想跑，GPS 不分 CPU 給它，<var>S<sub>i</sub></var> 和 <var>s<sub>i</sub></var> 都不動，所以 lag 停在睡前的值，醒來接著算。
+        這是一個選擇，不是唯一的算法。照這個算法，睡覺不會讓欠帳消失。v6.6 也是這樣做的，睡前把 lag 存進 <code>vlag</code>，醒來放回去。
+      </p>
+      <p>
+        CFS 和 v6.12 在這裡和 GPS 不一樣。CFS 讓剛醒的程式從 <code>min_vruntime − sched_latency</code> 開始，等於每次醒來都送它一段時間。
+        v6.12 的 <code>DELAY_DEQUEUE</code> 讓 lag 為負的程式睡著後還留在佇列上，慢慢把負的 lag 還掉，醒來時 lag 大約是 0。
+        從「睡覺時 lag 不變」的角度看，這兩種都等於把欠帳免了，所以圖上它們的 audio、editor 會一路往下。
+        如果改成「睡覺就把負的 lag 清掉」，v6.12 看起來會是公平的。論文對帶著 lag 離開的程式有幾種處理方式，這部分之後會再對照原文。
+      </p>
+          </article>
+    </section>
+
+    <section class="page" id="page-source" hidden>
+      <article class="card explain">
+        <h2>原始碼對照（製作中）</h2>
+        <p>這一頁會把模擬一步一步往前走，右邊同時顯示當年 kernel 對應的函式並標出執行到的行。
+          模擬器的函式名稱和 kernel 一致（<code>update_curr</code>、<code>place_entity</code>、<code>pick_eevdf</code>…），每一步都可以對到原始碼的行號。</p>
+        <p>預計先做 EEVDF 的 lag 相關函式：<code>avg_vruntime()</code>、<code>entity_eligible()</code>、<code>place_entity()</code>，
+          以及 CFS v2.6.24 的喚醒補償和 v6.5 之前 migration 時對 vruntime 的調整。</p>
+      </article>
+    </section>
+
+    <footer>
+      <p>模擬的簡化：單核、沒有 cgroup、HZ=1000、沒有 HRTICK。讀原始碼時的細節在 <code>notes/</code>。</p>
+    </footer>
+    <script type="module" src="/src/ui/main.ts"></script>
+  </body>
+</html>

@@ -92,9 +92,13 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 發現：只移植 `custom_slice` + `PREEMPT_SHORT` 時短 slice 無效（audio 帶負 lag 醒來、不 eligible）。改變範圍決定，加入 `DELAY_DEQUEUE` + `DELAY_ZERO` 後 audio 喚醒延遲從 620µs 降到 ~0。
   - 發現：以 GPS（睡眠時 lag 凍結）來看，DELAY_DEQUEUE 等於原諒睡眠期間的負 lag，audio 拿到 6.15%（GPS 5.49%）。
   - 下一步：前端（目前還沒有網頁）。
+- 2026-11-16：最小前端（`index.html`、`src/ui/`）。三個排程器並排：時間軸、相對 GPS 的 lag 曲線（游標同步顯示數值）、指標表；情境定義在 `src/scenarios.ts`，時間段由 `src/ref/recorder.ts` 記錄。
+  - 網頁分三頁（hash 路由）：模擬（控制列固定在頂端，圖在前、結果比較圖在後）、概念（lag 與 GPS 的推導）、原始碼（製作中）。情境說明預設收起來，強調不同程式要的是延遲還是吞吐量／公平。
+  - 下一步：原始碼頁（抽取腳本 + 步驟→行號 JSON），可加入 v6.5 的睡眠補償與 migration 程式碼做歷史對照。
 
 ## 指令
 
+- `npm run dev`：開網頁（Vite，http://localhost:5173）
 - `npm test`：跑模擬核心測試（vitest）
 - `npm run typecheck`
 - `npm run fetch-kernel-src`：重抓 `kernel-src/`
