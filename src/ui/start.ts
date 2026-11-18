@@ -330,19 +330,19 @@ const ERAS: Era[] = [
   {
     year: '2008',
     name: '2.6.24 CFS',
-    tag: '模擬頁第一欄',
+    tag: '模擬頁第一個排程器',
     body: '改為記錄 vruntime，也就是只記「跑了多少」，再挑最小的。如此一來 lag 不再明確存在，被喚醒的 task 則靠喚醒補償照顧。',
   },
   {
     year: '2023',
     name: '6.6 EEVDF',
-    tag: '模擬頁第二欄',
+    tag: '模擬頁第二個排程器',
     body: 'EEVDF 把 lag 正式帶回來，加上 eligible 與 deadline 兩個概念，演算法出自 1995 年 Stoica 等人的論文，lag 的上下界有證明。然而 slice 只有一種，task 無法表達自己的延遲需求。',
   },
   {
     year: '2024',
     name: '6.12',
-    tag: '模擬頁第三欄',
+    tag: '模擬頁第三個排程器',
     body: 'task 可以透過 <code>sched_attr</code> 指定自己的 slice，再搭配 <code>PREEMPT_SHORT</code> 與 <code>DELAY_DEQUEUE</code>，短 slice 才真正發揮作用。同一版也合併了 sched_ext，讓使用者能用 BPF 撰寫自己的 CPU scheduler（本網站不實作）。',
   },
 ];

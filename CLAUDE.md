@@ -120,7 +120,7 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 模擬頁：拿掉「怎麼看這一頁」卡片，改成 `src/ui/tour.ts` 的逐步導覽（第一次進來自動開始，localStorage 記住；控制列的「導覽」可重看）。決策檢視的細節預設收起；sched_feat 的說明改成滑鼠提示，只有關掉的開關才在下方寫出效果；「怎麼解讀」收起來，提示先做動手試。
   - 導覽列加高（64px，品牌標誌 + 副標、分頁底線），模擬頁的控制項移到第二列；高度寫進 `--topbar-h`，原始碼頁的步驟列貼在它下面。首頁和概念頁的卡片收窄到 880px。HTML 和 `source.ts` 裡中文斷行不要換行縮排，否則瀏覽器會多出空白。
   - 網頁改為五頁：介紹（`#/intro`，預設首頁：為什麼要了解 scheduler、各代為什麼一再改寫＋演進時間軸、各頁導覽卡片）、基礎觀念（`#/basics`，原「從這裡開始」，舊網址 `#/start` 導到介紹頁）、模擬、概念、原始碼。介紹頁與基礎觀念頁的文字改用 sysprog 講義的口吻（問題帶出主題、kernel 名詞保留英文、用 task 稱呼）；其餘頁面還沒改。
-  - 介紹頁的學習理由：CPU scheduler 是作業系統觀念的集大成、雲端資源分配（KVM vCPU 兩層排程與 steal time、Kubernetes CPU request → `cpu.weight`、limit → CFS bandwidth control）、效能分析（schedstat、perf sched、p99）、理論與工程的落差。用詞一律寫 CPU scheduler，不單寫 scheduler。延伸閱讀列 sysprog 講義系列（hackmd.io/@sysprog/linux-scheduler-0 起）、Stoica 1995 論文、LWN 925371。
+  - 介紹頁的學習理由：CPU scheduler 是作業系統觀念的集大成、效能分析（schedstat、perf sched、p99）、理論與工程的落差。用詞一律寫 CPU scheduler，不單寫 scheduler。延伸閱讀列 sysprog 講義系列（hackmd.io/@sysprog/linux-scheduler-0 起）、Stoica 1995 論文、LWN 925371。
   - 讀過 sysprog 講義系列：第 1 章（O(1)）沒有 `sleep_avg` / `effective_prio` / `goodness()` 的細節，之後做 O(1)、O(n) 仍要直接讀 2.6.0 / 2.4 原始碼；第 3 章分析的是 v5.16（有 GENTLE_FAIR_SLEEPERS），不是 v2.6.24；第 5 章（EEVDF）和本專案的 v6.6 / v6.12 實作一致，另有論文兩個 client 的逐步例子（w=2,2；r=2,1），可做成概念頁的互動圖。
 
 ## 指令
@@ -142,3 +142,10 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 兩頁重複的 GPS／lag 內容合併到第 3 章；推導、歷史、細節數字收進 `details.deep`（「深入：…」），主線只留直覺、公式、小圖和動手試。
   - 介紹頁「為什麼要了解 CPU scheduler」的四大段改成四張卡片，點一張才顯示那一段；延伸閱讀收起來。
   - 新增第 5 章「為什麼離開 CFS」：只有權重一個參數、延遲靠 heuristics（v6.5 → v6.6 移除 `GENTLE_FAIR_SLEEPERS`、`START_DEBIT`、`LAST_BUDDY`、`sysctl_sched_latency` / `min_granularity` / `wakeup_granularity`，已對照 `kernel-src/`）、latency-nice 與 dual tree、`PLACE_BONUS` 的 67/33 vs 50/50、各方 benchmark、介面從 latency-nice 改成 slice。引文出自 LKML（Zijlstra 的 v1–v3 cover letter、Hegde 的測試回覆）與 commit 147f3efaa241、5e963f2bd465，出處列在章末。git.kernel.org 對自動抓取回 403，commit 用 GitHub 鏡像讀；「Remove START_DEBIT」commit 的內文沒讀到。
+
+- 2026-11-18：原始碼頁減量。
+  - 每一步的說明改成「一句直覺 → 公式（KaTeX）→ 符號 → 代入數字」，文字只寫相對 `min_vruntime` / V 的量，絕對值只留在程式碼行下的註記。名詞提示接上（`linkTermsIn()`，名詞表新增 `vlag`、`sched_latency`）。
+  - v6.5 與 migration 只留結論和關鍵程式碼；SCHED_IDLE、`entity_is_long_sleeper()`、遠端喚醒的兩條路與 lock 細節已在 `notes/06`，網頁不放。頁尾拿掉「讀原始碼時的細節在 notes/」。
+  - 介紹頁拿掉「雲端資源的底層」卡片（KVM、steal time、Kubernetes）：本站沒有多核與 cgroup，讀者無法驗證。之後若做到 cgroup 再考慮。
+
+- 2026-11-18：拿掉模擬頁的「動手試」卡片（使用者不喜歡先猜再看答案）。改成 `Scenario.featNotes`：關掉某個 sched_feat 時，開關列下方顯示這個情境專屬的原因（一兩句，不寫數字），再加一行現算的前後數字（喚醒延遲、CPU 比例、context switch）；沒有專屬說明的開關用 `Feature.off`。情境 5 的觀察題改成 `Scenario.zoom` 提示列。測試 `test/events.test.ts` 檢查說明的開關存在、寫「完全不變」的真的不變、其他的真的有變。

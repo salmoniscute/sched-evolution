@@ -4,7 +4,7 @@ import { summarize, type Summary } from '../core/metrics.ts';
 import { NSEC_PER_MSEC as MS, NSEC_PER_SEC as SEC, NSEC_PER_USEC as US } from '../core/types.ts';
 import { GpsShadow, simulateGps, type ShadowSample, type ShadowTaskState } from '../ref/gps.ts';
 import { RunRecorder } from '../ref/recorder.ts';
-import { scenarios, type Exercise, type Scenario } from '../scenarios.ts';
+import { scenarios, type Scenario } from '../scenarios.ts';
 import { changedFlags, defaultFlags, variants, type Flags, type SchedVariant } from '../variants.ts';
 import { installCodeChips } from './code-chips.ts';
 import { renderMathIn } from './math.ts';
@@ -330,97 +330,6 @@ function scenarioCard(sc: Scenario): string {
 }
 
 // ---------------------------------------------------------------------------
-// 動手試：先猜，再照題目改開關看結果。答案的數字現算，不寫死。
-
-function exerciseCard(sc: Scenario): string {
-  if (!sc.exercises.length) return '';
-  const items = sc.exercises
-    .map((x, i) => {
-      const v = x.variant ? variants.find((d) => d.id === x.variant) : undefined;
-      const action = v
-        ? `<button type="button" class="apply" data-ex="${i}">照這樣設定：${v.title} 關掉 ${x.off!.join('、')}</button>`
-        : x.width
-          ? `<button type="button" class="apply" data-ex="${i}">照這樣設定：寬度 ${x.width}ms、lag 圖共用刻度</button>`
-          : '';
-      return `<li>
-        <p class="q">${x.question}</p>
-        <div class="ex-actions">${action}</div>
-        <details class="ans" data-ex="${i}"><summary>猜好了，看答案</summary><div class="ans-body"></div></details>
-      </li>`;
-    })
-    .join('');
-  return `<summary><b>動手試：先猜，再看</b><span class="more">${sc.exercises.length} 題</span></summary>
-    <p class="lead">先猜，再按「照這樣設定」看圖怎麼變，最後才打開答案。做完一題按排程器上的「恢復預設」。</p>
-    <ol class="ex-list">${items}</ol>`;
-}
-
-function quickRun(sc: Scenario, v: SchedVariant, flags: Flags) {
-  const shadow = new GpsShadow({ record: false });
-  const summary = summarize(new Simulator(v.make(flags), v.tasks(sc.tasks, flags), { duration: DURATION, observers: [shadow] }).run());
-  return { summary, states: shadow.states };
-}
-
-function exerciseAnswer(sc: Scenario, x: Exercise): string {
-  const pct = (n: number) => `${(n * 100).toFixed(2)}%`;
-  const lagRange = (st: ShadowTaskState | undefined) => (st ? `${fmtTime(st.lagMin)} … ${fmtTime(st.lagMax)}` : '—');
-  const name = sc.tasks[x.task]!.name;
-  const sleeper = sc.tasks[x.task]!.pattern.some((b) => b.sleep > 0);
-  let table: string;
-  if (x.variant) {
-    const v = variants.find((d) => d.id === x.variant)!;
-    const a = quickRun(sc, v, defaultFlags(v));
-    const b = quickRun(sc, v, { ...defaultFlags(v), ...Object.fromEntries(x.off!.map((k) => [k, false])) });
-    const gps = simulateGps(sc.tasks, { duration: DURATION }).tasks[x.task]!.runtime / DURATION;
-    const ta = a.summary.tasks[x.task]!;
-    const tb = b.summary.tasks[x.task]!;
-    const rows: [string, string, string][] = [];
-    if (sleeper) {
-      rows.push([`${name} 平均喚醒延遲`, fmtTime(ta.wakeupLatencyAvg), fmtTime(tb.wakeupLatencyAvg)]);
-      rows.push([`${name} 最久等了`, fmtTime(ta.wakeupLatencyMax), fmtTime(tb.wakeupLatencyMax)]);
-    }
-    rows.push([`${name} CPU 比例（公平的份 ${pct(gps)}）`, pct(ta.share), pct(tb.share)]);
-    rows.push([`${name} 相對 GPS 的 lag 範圍`, lagRange(a.states[x.task]), lagRange(b.states[x.task])]);
-    rows.push(['context switch 次數', String(a.summary.nr_switches), String(b.summary.nr_switches)]);
-    table = `<table class="ans-table"><thead><tr><th>${v.title}</th><th>預設</th><th>關掉 ${x.off!.join('、')}</th></tr></thead>
-      <tbody>${rows.map((r) => `<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join('')}</tbody></table>`;
-  } else {
-    const rows = variants.map((v) => {
-      const r = quickRun(sc, v, defaultFlags(v));
-      return `<tr><td>${v.title}</td>${sc.tasks.map((_, i) => `<td>${lagRange(r.states[i])}</td>`).join('')}</tr>`;
-    });
-    table = `<table class="ans-table"><thead><tr><th>相對 GPS 的 lag 範圍（2 秒內）</th>${sc.tasks.map((t) => `<th>${t.name}</th>`).join('')}</tr></thead>
-      <tbody>${rows.join('')}</tbody></table>`;
-  }
-  return `${table}<p>${x.answer}</p>`;
-}
-
-function wireExercises(sc: Scenario, box: HTMLElement): void {
-  for (const btn of box.querySelectorAll<HTMLButtonElement>('button.apply')) {
-    btn.addEventListener('click', () => {
-      const x = sc.exercises[Number(btn.dataset.ex)]!;
-      if (x.variant) {
-        const v = variants.find((d) => d.id === x.variant)!;
-        flagState.set(v.id, { ...defaultFlags(v), ...Object.fromEntries(x.off!.map((k) => [k, false])) });
-        rebuild();
-        const i = variants.indexOf(v);
-        panels.children[i]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } else {
-        if (x.width) widthSel.value = String(x.width);
-        sharedLag.checked = true;
-        updateView();
-        panels.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-    });
-  }
-  for (const d of box.querySelectorAll<HTMLDetailsElement>('details.ans')) {
-    d.addEventListener('toggle', () => {
-      const body = d.querySelector<HTMLElement>('.ans-body')!;
-      if (d.open && !body.innerHTML) body.innerHTML = exerciseAnswer(sc, sc.exercises[Number(d.dataset.ex)]!);
-    });
-  }
-}
-
-// ---------------------------------------------------------------------------
 // 結果：兩張比較圖（延遲、公平），數字直接取自模擬
 
 function fmtPt(x: number): string {
@@ -507,7 +416,7 @@ function resultsSection(sc: Scenario): string {
     <p class="lead">把兩種需求分開來比，數字是 2 秒模擬的總計。</p>${warn}
     ${latencyChart(sc, data.runs)}
     ${fairnessChart(sc, data.runs, data.gpsShare)}
-    <details class="takeaway"><summary>怎麼解讀<span class="more">建議先做完上面的「動手試」再打開</span></summary>
+    <details class="takeaway"><summary>怎麼解讀<span class="more">先試著關掉幾個開關，再打開</span></summary>
     <ul>${sc.takeaway.map((x) => `<li>${x}</li>`).join('')}</ul></details>`;
 }
 
@@ -545,14 +454,17 @@ let sel: number | null = null;
 const INSPECT_HINT = '點時間軸上任何一處（例如某個程式的淺色段），看那一刻排程器為什麼這樣決定';
 
 /** 排程器的開關列 */
-function featureBar(run: RunData): HTMLElement {
+function featureBar(run: RunData, sc: Scenario): HTMLElement {
   const box = document.createElement('div');
   box.className = 'feats';
-  const desc = document.createElement('p');
+  const desc = document.createElement('div');
   desc.className = 'feat-desc';
-  // 平常不佔版面；只有關掉的開關才在下面寫出關掉的效果。每個開關做什麼放在滑鼠提示裡。
+  // 平常不佔版面；只有關掉的開關才在下面寫出效果。這個情境有專屬說明就用它，否則用一般說明。
+  // 每個開關做什麼放在滑鼠提示裡。
   const off = run.def.features.filter((f) => run.changed.includes(f.key));
-  desc.innerHTML = off.map((f) => `<span><code>${f.key}</code> 關掉：${f.off}</span>`).join('');
+  const notes = off.map((f) => ({ f, n: sc.featNotes.find((x) => x.variant === run.def.id && x.key === f.key) }));
+  desc.innerHTML =
+    notes.map(({ f, n }) => `<p><code>${f.key}</code> 關掉：${n?.note ?? f.off}</p>`).join('') + featDelta(run, notes.map(({ n }) => n?.task ?? 0));
   desc.hidden = !off.length;
   const row = document.createElement('div');
   row.className = 'feat-row';
@@ -589,21 +501,48 @@ function featureBar(run: RunData): HTMLElement {
   return box;
 }
 
+/** 關掉開關前後的數字：指定程式的喚醒延遲與 CPU 比例，加上 context switch */
+function featDelta(run: RunData, taskIdx: number[]): string {
+  const base = run.base;
+  if (!base) return '';
+  if (JSON.stringify(base) === JSON.stringify(run.summary)) return '<p class="delta">和預設值比，每個數字都一樣。</p>';
+  const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
+  const arrow = (a: string, b: string) => `${a} → <b>${b}</b>`;
+  const parts: string[] = [];
+  for (const i of [...new Set(taskIdx)]) {
+    const a = base.tasks[i]!;
+    const b = run.summary.tasks[i]!;
+    const xs: string[] = [];
+    if (b.wakeups) xs.push(`平均喚醒延遲 ${arrow(fmtTime(a.wakeupLatencyAvg), fmtTime(b.wakeupLatencyAvg))}`);
+    xs.push(`CPU 比例 ${arrow(pct(a.share), pct(b.share))}`);
+    parts.push(`${b.name}：${xs.join('，')}`);
+  }
+  parts.push(`context switch ${arrow(String(base.nr_switches), String(run.summary.nr_switches))}`);
+  return `<p class="delta">預設 → 關掉之後　${parts.join('；')}</p>`;
+}
+
 /** 決策檢視的「排程器實際比了什麼」要不要展開；跟著使用者上次的選擇 */
 let detailOpen = false;
-let builtFor = '';
+
+/** 換個時間尺度看的提示（情境有 zoom 才顯示） */
+function zoomHint(sc: Scenario): void {
+  const box = $('zoomHint');
+  box.hidden = !sc.zoom;
+  if (!sc.zoom) return;
+  const z = sc.zoom;
+  box.innerHTML = `<span>${z.text}</span><button type="button">看 ${z.width}ms（lag 圖共用刻度）</button>`;
+  box.querySelector('button')!.addEventListener('click', () => {
+    widthSel.value = String(z.width);
+    sharedLag.checked = true;
+    updateView();
+    panels.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+}
 
 function rebuild(): void {
   const sc = scenarios.find((s) => s.id === scenarioSel.value)!;
   $('scenarioCard').innerHTML = scenarioCard(sc);
-  // 換情境才重畫題目，否則按了「照這樣設定」之後，已經打開的答案會被收起來
-  if (builtFor !== sc.id) {
-    const ex = $('exercises');
-    ex.innerHTML = exerciseCard(sc);
-    ex.hidden = !sc.exercises.length;
-    wireExercises(sc, ex);
-    builtFor = sc.id;
-  }
+  zoomHint(sc);
   data = simulate(sc);
   $('results').innerHTML = resultsSection(sc);
   panels.innerHTML = '';
@@ -626,7 +565,7 @@ function rebuild(): void {
       <canvas class="lag"></canvas>
       <div class="chart-label readout">&nbsp;</div>
       <div class="metrics">${metricsTable(run, data.gpsShare)}</div>`;
-    el.querySelector('.feat-slot')!.replaceWith(featureBar(run));
+    el.querySelector('.feat-slot')!.replaceWith(featureBar(run, sc));
     panels.append(el);
     const c: Chart = {
       timeline: el.querySelector<HTMLCanvasElement>('canvas.timeline')!,
@@ -766,8 +705,8 @@ function tourSteps(): TourStep[] {
     },
     {
       target: () => panel(1) ?? null,
-      title: '三欄並排',
-      body: `三欄跑的是同一組程式，只有排程器不同。比比看同一個 ${first} 在三欄各排隊多久。`,
+      title: '上下比較',
+      body: `三個排程器上下排，跑的是同一組程式，時間軸的刻度對齊。往下對同一個時刻，比比看 ${first} 在各個排程器裡排隊多久。`,
     },
     {
       target: () => q(0, 'canvas.lag'),
@@ -777,16 +716,10 @@ function tourSteps(): TourStep[] {
     {
       target: () => q(0, '.feats'),
       title: '開關',
-      body: '這一版 kernel 的 sched_feat，預設全開。滑鼠移到名稱上看它做什麼；關掉一個，下面的表格會附上預設值對照。',
-    },
-    {
-      target: () => (exercisesBox.hidden ? null : exercisesBox),
-      title: '動手試',
-      body: '不知道從哪裡開始，就從這裡：每題先猜，再按按鈕套用設定，看圖怎麼變。',
+      body: '這一版 kernel 的 sched_feat，預設全開。不知道從哪裡開始，就從這裡：關掉一個，下面會寫出在這個情境裡變成怎樣、為什麼，以及前後的數字。',
     },
   ];
 }
-const exercisesBox = $('exercises');
 $('tourBtn').addEventListener('click', () => startTour(tourSteps()));
 
 // ---- 分頁（#/intro、#/learn/<章>、#/sim、#/source）

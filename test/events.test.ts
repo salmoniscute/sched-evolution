@@ -101,18 +101,20 @@ test('latestForPid：點在等待中的程式，回到它開始排隊的事件',
   expect(latestAtOrBefore(rec.events, -1)).toBe(-1);
 });
 
-describe('動手試', () => {
-  const all = scenarios.flatMap((sc) => sc.exercises.map((x, i) => [`${sc.id} #${i + 1}`, sc, x] as const));
-  test.each(all)('%s：題目的設定有效，而且真的改變結果（觀察題除外）', (_name, sc, x) => {
+describe('開關的情境說明', () => {
+  const all = scenarios.flatMap((sc) => sc.featNotes.map((x) => [`${sc.id} ${x.variant} ${x.key}`, sc, x] as const));
+  test.each(all)('%s：開關存在；寫「完全不變」的真的完全不變，其他的真的有變', (_name, sc, x) => {
     expect(sc.tasks[x.task]).toBeDefined();
-    if (!x.variant) return expect(x.width).toBeGreaterThan(0);
     const v = variants.find((d) => d.id === x.variant)!;
     expect(v).toBeDefined();
-    for (const k of x.off!) expect(v.features.map((f) => f.key)).toContain(k);
+    expect(v.features.map((f) => f.key)).toContain(x.key);
     const a = runWith(v, defaultFlags(v), sc.id).summary;
-    const b = runWith(v, { ...defaultFlags(v), ...Object.fromEntries(x.off!.map((k) => [k, false])) }, sc.id).summary;
-    // 「不會變」的題目要真的完全不變；其他題目要真的有變
+    const b = runWith(v, { ...defaultFlags(v), [x.key]: false }, sc.id).summary;
     const same = JSON.stringify(a) === JSON.stringify(b);
-    expect(same).toBe(/完全不變/.test(x.answer));
+    expect(same).toBe(/完全不變/.test(x.note));
+  });
+  test.each(scenarios.map((sc) => [sc.id, sc] as const))('%s：同一個開關只有一則說明', (_id, sc) => {
+    const keys = sc.featNotes.map((x) => `${x.variant}/${x.key}`);
+    expect(new Set(keys).size).toBe(keys.length);
   });
 });

@@ -75,7 +75,7 @@ export function showChapter(id: string | undefined): string {
   return cur.id;
 }
 
-/** 介紹頁「為什麼要了解 CPU scheduler」的四張卡片：點一張，下面顯示那一段 */
+/** 介紹頁「為什麼要了解 CPU scheduler」的三張卡片：點一張，下面顯示那一段 */
 function mountReasons(): void {
   const box = document.getElementById('w-reasons');
   if (!box) return;

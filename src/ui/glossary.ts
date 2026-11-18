@@ -71,6 +71,16 @@ export const terms: Term[] = [
     def: '應得 − 實得。正的表示排程器欠它 CPU，負的表示它多拿了。kernel 用 權重 × (V − vruntime) 算，模擬頁下方的圖則是照 GPS 另外算的。',
   },
   {
+    name: 'vlag',
+    match: ['vlag'],
+    def: 'EEVDF 在程式離開佇列時存下的 V − vruntime（截在 ±limit 內）。睡醒回來時用它放回 V − vlag 的位置，所以睡多久都不影響。',
+  },
+  {
+    name: 'sched_latency',
+    match: ['sched_latency', 'sysctl_sched_latency'],
+    def: 'CFS 的目標週期：每個想跑的程式在這段時間內至少輪到一次。v2.6.24 單核是 20ms，也是喚醒補償的上限。',
+  },
+  {
     name: 'eligible',
     match: ['eligible'],
     def: '有資格被 EEVDF 選中：lag ≥ 0，也就是 vruntime 沒有超過 V、沒有多拿。多拿的程式要等 V 往前追過它才恢復資格。',
@@ -156,6 +166,25 @@ export function linkTerms(escaped: string, seen = new Set<string>()): string {
     seen.add(t.name);
     return term(m);
   });
+}
+
+/** 對一棵 DOM 裡的文字標出術語（略過程式碼、公式、SVG、連結），seen 跨元素共用 */
+export function linkTermsIn(root: Element, seen = new Set<string>()): void {
+  const skip = 'code, pre, figure.code, svg, a, .katex, .tex, .tex-block, .term, h2, h3, th, summary';
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode: (n) => (n.parentElement?.closest(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT),
+  });
+  const nodes: Text[] = [];
+  for (let n = walker.nextNode(); n; n = walker.nextNode()) nodes.push(n as Text);
+  for (const n of nodes) {
+    const raw = n.nodeValue ?? '';
+    const esc = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const html = linkTerms(esc, seen);
+    if (html === esc) continue;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    n.replaceWith(tpl.content);
+  }
 }
 
 /** 名詞速查（入門頁） */

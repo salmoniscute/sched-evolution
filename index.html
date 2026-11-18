@@ -54,15 +54,13 @@
         <h2>為什麼要了解 CPU scheduler</h2>
         <div class="reasons" id="w-reasons">
           <button type="button" class="reason" data-r="0"><b>作業系統觀念的集大成</b><span>task 狀態、timer interrupt、preemption、lock 與紅黑樹，都在同一段程式碼裡出現</span></button>
-          <button type="button" class="reason" data-r="1"><b>雲端資源的底層</b><span>KVM 的 vCPU、steal time、Kubernetes 的 CPU request 與 limit</span></button>
-          <button type="button" class="reason" data-r="2"><b>效能分析</b><span>程式慢，可能是在 runqueue 裡等；p99 延遲常出在這裡</span></button>
-          <button type="button" class="reason" data-r="3"><b>理論與工程的落差</b><span>比例分享有證明，kernel 卻得面對整數、tick 與相容性</span></button>
+          <button type="button" class="reason" data-r="1"><b>效能分析</b><span>程式慢，可能是在 runqueue 裡等；p99 延遲常出在這裡</span></button>
+          <button type="button" class="reason" data-r="2"><b>理論與工程的落差</b><span>比例分享有證明，kernel 卻得面對整數、tick 與相容性</span></button>
         </div>
         <div class="reason-body">
           <p data-r="0">要弄懂 CPU scheduler 怎麼運作，幾乎會碰到作業系統課本的每一章：process 的狀態與 <code>task_struct</code>、驅動 tick 的 timer interrupt、context switch 與 preemption（以及哪些區段不能被搶占）、保護 runqueue 的 lock、為了常數時間挑選而設計的資料結構（O(1) 的 bitmap、CFS 的紅黑樹、EEVDF 的 augmented 紅黑樹），再往外延伸到多核的 load balancing、cache 與 NUMA 的區域性，以及省電。換句話說，讀懂 CPU scheduler，等於把這些觀念放在同一個真實的系統裡重新串起來。</p>
-          <p data-r="1" hidden>在 KVM 上，guest 的每一個 vCPU 對 host 而言只是一個普通的 thread，由 host 的 CPU scheduler 決定何時執行；guest 自己的 CPU scheduler 則在這之上再排一次，形成兩層排程。當 host 把 vCPU 超賣（oversubscription）時，guest 裡看到的 steal time，就是 vCPU 想執行卻在 host 的 runqueue 裡等待的時間。容器也是一樣：Kubernetes 的 CPU request 會轉成 cgroup 的 <code>cpu.weight</code>，本質上就是本站介紹的權重與比例分享；CPU limit 則透過 CFS bandwidth control（<code>cpu.max</code>）限制每個週期能用的時間，用完就被 throttle，這正是容器裡常見的延遲突波來源之一。本站只模擬單核、不含 cgroup，但權重、比例分享與延遲的取捨，在這些場景裡是同一套觀念。</p>
-          <p data-r="2" hidden>一個 task 經過的時間，可以拆成真正在 CPU 上執行的時間，以及想執行卻在 runqueue 裡等待的時間，後者完全由 CPU scheduler 決定。Linux 在 <code>/proc/&lt;pid&gt;/schedstat</code> 裡分別記錄這兩者，<code>perf sched latency</code> 也能列出每個 task 被喚醒後等了多久。對伺服器而言，真正讓使用者感到卡頓的往往是 p99 這類尾端延遲，而處理 request 的 thread 被喚醒後要等多久才能執行，正是 CPU scheduler 的責任；反過來說，頻繁切換 task 雖然能降低延遲，卻會增加 context switch 的成本、破壞 cache 的區域性，讓吞吐量下降。不了解 CPU scheduler 在這兩端之間怎麼取捨，看到這些數字也很難判斷問題出在哪裡。</p>
-          <p data-r="3" hidden>CPU scheduler 是作業系統裡理論與工程交會得最明顯的地方之一：比例分享（proportional share）有乾淨的數學模型，EEVDF 甚至出自 1995 年 Stoica 與 Abdel-Wahab 附有證明的論文；但 kernel 的實作必須面對整數運算、tick 的粒度、各式各樣的工作負載，以及「不能讓既有使用者變慢」的壓力。逐一比較理論模型和 kernel 實作的落差，是理解這些工程取捨最直接的方式。</p>
+          <p data-r="1" hidden>一個 task 經過的時間，可以拆成真正在 CPU 上執行的時間，以及想執行卻在 runqueue 裡等待的時間，後者完全由 CPU scheduler 決定。Linux 在 <code>/proc/&lt;pid&gt;/schedstat</code> 裡分別記錄這兩者，<code>perf sched latency</code> 也能列出每個 task 被喚醒後等了多久。對伺服器而言，真正讓使用者感到卡頓的往往是 p99 這類尾端延遲，而處理 request 的 thread 被喚醒後要等多久才能執行，正是 CPU scheduler 的責任；反過來說，頻繁切換 task 雖然能降低延遲，卻會增加 context switch 的成本、破壞 cache 的區域性，讓吞吐量下降。不了解 CPU scheduler 在這兩端之間怎麼取捨，看到這些數字也很難判斷問題出在哪裡。</p>
+          <p data-r="2" hidden>CPU scheduler 是作業系統裡理論與工程交會得最明顯的地方之一：比例分享（proportional share）有乾淨的數學模型，EEVDF 甚至出自 1995 年 Stoica 與 Abdel-Wahab 附有證明的論文；但 kernel 的實作必須面對整數運算、tick 的粒度、各式各樣的工作負載，以及「不能讓既有使用者變慢」的壓力。逐一比較理論模型和 kernel 實作的落差，是理解這些工程取捨最直接的方式。</p>
         </div>
 
         <h2>為什麼 Linux 一再改寫 CPU scheduler</h2>
@@ -453,7 +451,7 @@
 
     <section class="page" id="page-sim">
       <details class="card scenario" id="scenarioCard"></details>
-      <details class="card tryit" id="exercises"></details>
+      <p class="card zoom-hint" id="zoomHint" hidden></p>
       <main id="panels"></main>
       <section id="results" class="card results"></section>
     </section>
@@ -554,7 +552,7 @@
     <section class="page" id="page-source" hidden></section>
 
     <footer>
-      <p>模擬的簡化：單核、沒有 cgroup、HZ=1000、沒有 HRTICK。讀原始碼時的細節在 <code>notes/</code>。</p>
+      <p>模擬的簡化：單核、沒有 cgroup、HZ=1000、沒有 HRTICK。</p>
     </footer>
     <script type="module" src="/src/ui/main.ts"></script>
   </body>
