@@ -14,6 +14,8 @@ FILES=(
   "v2.6.24 kernel/sched_fair.c"       # vruntime / place_entity 首次出現
   "v2.6.24 kernel/sched.c"            # cfs_rq 定義、prio_to_weight[]、calc_delta_mine
   "v2.6.24 include/linux/sched.h"     # struct sched_entity
+  "v6.5    kernel/sched/fair.c"       # EEVDF 之前最後一版 CFS：GENTLE_FAIR_SLEEPERS、migration 的 vruntime 正規化
+  "v6.5    kernel/sched/features.h"
   "v6.6    kernel/sched/fair.c"
   "v6.6    kernel/sched/core.c"       # sched_prio_to_weight[]
   "v6.6    kernel/sched/sched.h"

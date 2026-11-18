@@ -39,6 +39,30 @@ export interface SimConfig {
  */
 export interface SimObserver {
   onAdvance(t0: Ns, t1: Ns, curr: Task<unknown> | null, runnable: readonly Task<unknown>[]): void;
+  /** 排程事件（挑選、沒有觸發重新排程的喚醒）。有旁觀者實作這個方法時引擎才會拍快照。 */
+  onEvent?(e: SchedEvent): void;
+}
+
+/** 為什麼呼叫 schedule()：curr 去睡、tick、有 task 醒來、有新 task */
+export type SchedCause = 'sleep' | 'tick' | 'wakeup' | 'new';
+
+/**
+ * 一次排程決策，給介面解釋「為什麼是它」。
+ * - kind = 'pick'：schedule() 挑了 next（可能和 prev 相同）。
+ * - kind = 'wakeup'：有 task 醒來（或被建立），但 check_preempt_curr 沒有要求重新排程，curr 繼續跑。
+ */
+export interface SchedEvent {
+  t: Ns;
+  kind: 'pick' | 'wakeup';
+  cause: SchedCause;
+  /** 觸發的 task：去睡的、醒來的、新建立的；tick 時是 curr */
+  causePid: number | null;
+  prev: number | null;
+  next: number | null;
+  /** pick：put_prev_task 之後、pick_next_task 之前的 class->snapshot()；wakeup 沒有 */
+  before: unknown;
+  /** 決策之後的 class->snapshot() */
+  snapshot: unknown;
 }
 
 /** 每個 task 的統計，由引擎自己記，不依賴排程器的 schedstats */
@@ -91,6 +115,9 @@ export class Simulator<SE> {
   private idleTime = 0;
   private nr_switches = 0;
   private nr_schedule = 0;
+  private readonly eventObservers: SimObserver[];
+  /** 下一次 schedule() 的原因（第一個設定 need_resched 的事件） */
+  private cause: { kind: SchedCause; pid: number | null } | null = null;
 
   constructor(
     readonly sched: SchedClass<SE>,
@@ -100,6 +127,7 @@ export class Simulator<SE> {
     const hz = cfg.hz ?? 1000;
     this.tickNs = Math.round(NSEC_PER_SEC / hz);
     this.nextTick = this.tickNs;
+    this.eventObservers = (cfg.observers ?? []).filter((o) => o.onEvent);
     this.rq = {
       clock: 0,
       tick_nsec: this.tickNs,
@@ -187,7 +215,9 @@ export class Simulator<SE> {
         if (this.bk(p).wakeAt === t) this.try_to_wake_up(p);
       }
       if (t === this.nextTick) {
+        const pending = rq.need_resched;
         this.scheduler_tick();
+        if (!pending && rq.need_resched) this.cause ??= { kind: 'tick', pid: rq.curr?.pid ?? null };
         this.nextTick += this.tickNs;
       }
       // 從中斷 / 喚醒返回時檢查 TIF_NEED_RESCHED
@@ -234,6 +264,7 @@ export class Simulator<SE> {
     // set_current_state(TASK_INTERRUPTIBLE); schedule();
     p.state = 'SLEEPING';
     this.bk(p).wakeAt = this.rq.clock + sleep;
+    this.cause = { kind: 'sleep', pid: p.pid };
     this.schedule();
   }
 
@@ -241,6 +272,7 @@ export class Simulator<SE> {
   private wake_up_new_task(p: Task<SE>): void {
     const { rq } = this;
     rq.trace.log(rq.clock, 'wake_up_new_task', p.pid);
+    const pending = rq.need_resched;
     p.state = 'RUNNING';
     this.loadBurst(p);
     // 簡化：一律走 class->task_new。kernel 在 parent 不在 runqueue 時
@@ -249,6 +281,29 @@ export class Simulator<SE> {
     rq.nr_running++;
     this.bk(p).runnableSince = rq.clock;
     this.check_preempt_curr(p);
+    this.afterWake('new', p, pending);
+  }
+
+  /** 喚醒之後：要重新排程就記下原因，否則發一個「醒來但 curr 繼續跑」的事件 */
+  private afterWake(kind: 'wakeup' | 'new', p: Task<SE>, pending: boolean): void {
+    const { rq } = this;
+    if (rq.need_resched) {
+      if (!pending) this.cause ??= { kind, pid: p.pid };
+      return;
+    }
+    if (!this.eventObservers.length) return;
+    const curr = rq.curr?.pid ?? null;
+    const e: SchedEvent = {
+      t: rq.clock,
+      kind: 'wakeup',
+      cause: kind,
+      causePid: p.pid,
+      prev: curr,
+      next: curr,
+      before: null,
+      snapshot: this.sched.snapshot(rq),
+    };
+    for (const o of this.eventObservers) o.onEvent!(e);
   }
 
   /** try_to_wake_up()（v2.6.24 kernel/sched.c:1507） */
@@ -256,6 +311,7 @@ export class Simulator<SE> {
     const { rq } = this;
     const b = this.bk(p);
     rq.trace.log(rq.clock, 'try_to_wake_up', p.pid);
+    const pending = rq.need_resched;
     b.wakeAt = null;
     b.wokenAt = rq.clock;
     b.runnableSince = rq.clock;
@@ -264,6 +320,7 @@ export class Simulator<SE> {
     this.sched.enqueue_task(rq, p, true);
     rq.nr_running++;
     this.check_preempt_curr(p);
+    this.afterWake('wakeup', p, pending);
   }
 
   /** check_preempt_curr()（v2.6.24 kernel/sched.c:368） */
@@ -284,7 +341,6 @@ export class Simulator<SE> {
     const { rq } = this;
     const prev = rq.curr;
     this.nr_schedule++;
-    rq.need_resched = false;
     rq.trace.log(rq.clock, 'schedule', prev?.pid);
 
     const voluntary = prev !== null && prev.state === 'SLEEPING';
@@ -294,7 +350,28 @@ export class Simulator<SE> {
       rq.nr_running--;
     }
     if (prev) this.sched.put_prev_task(rq, prev);
+    const cause = this.cause ?? { kind: 'tick' as const, pid: prev?.pid ?? null };
+    this.cause = null;
+    const watching = this.eventObservers.length > 0;
+    const before = watching ? this.sched.snapshot(rq) : null;
     const next = this.sched.pick_next_task(rq);
+    // clear_tsk_need_resched(prev)：v6.6 是在 pick_next_task() 之後才清（kernel/sched/core.c 的 __schedule()）。
+    // dequeue 途中 update_curr() → update_deadline() 設的 need_resched 已經由這次挑選處理掉，不能留到下一輪。
+    // v2.6.24 是在 deactivate_task() 之前清，但它的 dequeue 路徑不會設 need_resched，結果相同。
+    rq.need_resched = false;
+    if (watching) {
+      const e: SchedEvent = {
+        t: rq.clock,
+        kind: 'pick',
+        cause: cause.kind,
+        causePid: cause.pid,
+        prev: prev?.pid ?? null,
+        next: next?.pid ?? null,
+        before,
+        snapshot: this.sched.snapshot(rq),
+      };
+      for (const o of this.eventObservers) o.onEvent!(e);
+    }
 
     if (next === prev) return;
 

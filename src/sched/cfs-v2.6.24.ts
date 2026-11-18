@@ -77,6 +77,8 @@ export interface EntityView {
   name: string;
   weight: number;
   vruntime: Ns;
+  /** sched_slice()：以目前的 nr_running 與總權重算出的時間片（實際時間） */
+  slice: Ns;
   sum_exec_runtime: Ns;
 }
 
@@ -260,19 +262,33 @@ export class CfsV2_6_24 implements SchedClass<SchedEntity> {
   private place_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity, initial: boolean): void {
     let vruntime = cfs_rq.min_vruntime;
     const { features } = this.tun;
+    // 以下兩個只給 trace 用：START_DEBIT 的量、喚醒補償的量
+    let debit = 0;
+    let thresh = 0;
 
-    if (initial && features.START_DEBIT) vruntime += this.sched_vslice_add(cfs_rq, se);
-
-    if (!initial) {
-      if (features.NEW_FAIR_SLEEPERS) vruntime -= this.tun.sysctl_sched_latency;
-      vruntime = max_vruntime(se.vruntime, vruntime);
+    if (initial && features.START_DEBIT) {
+      debit = this.sched_vslice_add(cfs_rq, se);
+      vruntime += debit;
     }
+
+    if (!initial && features.NEW_FAIR_SLEEPERS) {
+      thresh = this.tun.sysctl_sched_latency;
+      vruntime -= thresh;
+    }
+    // max_vruntime 之前的候選位置（只給 trace 用）
+    const candidate = vruntime;
+    if (!initial) vruntime = max_vruntime(se.vruntime, vruntime);
 
     rq.trace.log(rq.clock, 'place_entity', se.task.pid, {
       initial,
       old_vruntime: se.vruntime,
       vruntime,
       min_vruntime: cfs_rq.min_vruntime,
+      debit,
+      thresh,
+      candidate,
+      /** max_vruntime 選了原本的 vruntime（補償沒用上） */
+      kept_old: !initial && se.vruntime - candidate > 0,
     });
     se.vruntime = vruntime;
   }
@@ -291,7 +307,7 @@ export class CfsV2_6_24 implements SchedClass<SchedEntity> {
     this.update_curr(rq, cfs_rq);
     if (se !== cfs_rq.curr) this.__dequeue_entity(rq, cfs_rq, se);
     this.account_entity_dequeue(cfs_rq, se);
-    rq.trace.log(rq.clock, 'dequeue_entity', se.task.pid, { sleep, vruntime: se.vruntime });
+    rq.trace.log(rq.clock, 'dequeue_entity', se.task.pid, { sleep, vruntime: se.vruntime, min_vruntime: cfs_rq.min_vruntime });
   }
 
   // ---- 搶佔與挑選 -------------------------------------------------------
@@ -410,14 +426,15 @@ export class CfsV2_6_24 implements SchedClass<SchedEntity> {
   }
 
   snapshot(rq: Rq<SchedEntity>): CfsSnapshot {
+    const c = this.cfs_rq;
     const view = (se: SchedEntity): EntityView => ({
       pid: se.task.pid,
       name: se.task.name,
       weight: se.load.weight,
       vruntime: se.vruntime,
+      slice: c.load.weight ? this.sched_slice(c, se) : 0,
       sum_exec_runtime: se.sum_exec_runtime,
     });
-    const c = this.cfs_rq;
     return {
       clock: rq.clock,
       min_vruntime: c.min_vruntime,

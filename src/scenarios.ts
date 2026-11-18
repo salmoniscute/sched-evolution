@@ -9,6 +9,22 @@ export interface Role {
   needs: string;
 }
 
+/**
+ * 動手試：先猜，再照著設定看結果。答案的數字在網頁上現算（預設值 vs. 照題目改過開關），
+ * 所以 answer 只寫原因，不寫數字。
+ */
+export interface Exercise {
+  question: string;
+  /** 要改的排程器（variants.ts 的 id）與要關掉的開關；沒有就只是觀察題 */
+  variant?: string;
+  off?: string[];
+  /** 答案要列出哪個程式的數字（tasks 的索引） */
+  task: number;
+  /** 觀察題：建議的時間軸寬度（ms） */
+  width?: number;
+  answer: string;
+}
+
 export interface Scenario {
   id: string;
   title: string;
@@ -17,6 +33,7 @@ export interface Scenario {
   roles: Role[];
   lookFor: string[];
   takeaway: string[];
+  exercises: Exercise[];
   tasks: TaskSpec[];
 }
 
@@ -56,6 +73,59 @@ export const scenarios: Scenario[] = [
       'EEVDF v6.12 的 audio 宣告了 0.3ms 的短 slice，平均只等 3µs。它拿到自己需要的 6.2%，比公平的份多一點，cc1、cc2 各少約 0.3 個百分點。',
       'v6.6 和 v6.12 的差別在於程式可以把需求告訴排程器。前面幾代都是排程器自己猜誰是互動型的。',
     ],
+    exercises: [
+      {
+        question: 'CFS 的 audio 幾乎不用等。把喚醒補償 NEW_FAIR_SLEEPERS 關掉，audio 每次醒來要等多久？它拿到的 CPU 會變多還是變少？',
+        variant: 'cfs-v2.6.24',
+        off: ['NEW_FAIR_SLEEPERS'],
+        task: 0,
+        answer:
+          '沒有補償，醒來的 audio 放在 min_vruntime，和 cc1、cc2 差不多。check_preempt_wakeup() 要 vruntime 小超過 10ms 才搶佔，條件不成立，' +
+          'audio 只能等正在跑的 cc 在 tick 時用完 sched_slice（三個程式時約 6.7ms），而且大多數時候還要再等另一個 cc 跑一段，因為它們的 vruntime 和 audio 差不多。' +
+          'audio 一個週期本來只要 5ms，現在光等就要 8ms 多，一秒能完成的週期變少，所以 CPU 比例反而掉到公平的份以下。真的在放音樂的話就是斷音。' +
+          '點時間軸上 audio 的淺色段，可以看到每一次的理由。',
+      },
+      {
+        question: 'CFS 預設允許醒來的程式插隊（WAKEUP_PREEMPT）。把它關掉，CFS 會變成 non-preemptive 嗎？audio 要等多久？2 秒內的 context switch 會變多還是變少？',
+        variant: 'cfs-v2.6.24',
+        off: ['WAKEUP_PREEMPT'],
+        task: 0,
+        answer:
+          '不會變成 non-preemptive。tick 時 check_preempt_tick() 照樣會在 curr 用完 sched_slice 時把它換下，關掉的只是「醒來那一刻」的搶占。' +
+          'audio 醒來後不能插隊，要等正在跑的 cc 在某個 tick 用完 slice。少了插隊，cc 被打斷的次數變少，context switch 也跟著變少：' +
+          '這就是用延遲換吞吐量，audio 等得久，cc 每次跑得比較完整。audio 的週期被拉長，一秒內完成的週期變少，CPU 比例也跟著下降。',
+      },
+      {
+        question: 'EEVDF v6.6 的 audio 平均要等 600 多 µs。關掉 RUN_TO_PARITY，讓每次有人醒來都重新比 deadline，audio 會比較快輪到嗎？',
+        variant: 'eevdf-v6.6',
+        off: ['RUN_TO_PARITY'],
+        task: 0,
+        answer:
+          '幾乎沒變。用決策檢視看 audio 醒來的那幾刻：開著 RUN_TO_PARITY 時，常見的理由是「cc 要先把 slice 跑完」；關掉之後，理由變成「audio 不 eligible」或「cc 的 deadline 比較早」。' +
+          'v6.6 每個程式的 slice 都是 0.75ms，audio 醒來時的 deadline 通常不會比 cc 早，就算重新比也是 cc 先。' +
+          '要讓 audio 先跑，得讓它的 deadline 比別人早，也就是更短的 slice，這就是 v6.12 的做法。',
+      },
+      {
+        question: '再看 v6.6：PLACE_LAG 讓程式睡前的 lag 醒來照樣帶回來。關掉它，醒來一律從 lag = 0 開始，聽起來對 audio 比較寬容。audio 會變好還是變差？',
+        variant: 'eevdf-v6.6',
+        off: ['PLACE_LAG'],
+        task: 0,
+        answer:
+          '變差：等得更久，CPU 也拿得比公平的份少。lag = 0 雖然 eligible，但 deadline 是 V + 0.75ms，幾乎都比正在跑的 cc 晚，所以每次都要等 cc 跑完手上的 slice。' +
+          '等待的時候 GPS 照樣把份額算給 audio，也就是排程器欠它；PLACE_LAG 本來會把這筆正的 lag 存起來、下次醒來還給它，關掉之後睡一覺就歸零。' +
+          '開到 2 秒看 lag 圖，藍線會一路往上：audio 長期被少給。PLACE_LAG 不只是「多拿的要還」，也是「被欠的要補」。',
+      },
+      {
+        question: 'v6.12 的 audio 宣告了 0.3ms 的 slice，幾乎不用等。如果只關掉 DELAY_DEQUEUE，短 slice 還有用嗎？',
+        variant: 'eevdf-v6.12-slice',
+        off: ['DELAY_DEQUEUE'],
+        task: 0,
+        answer:
+          '沒用了，延遲回到 v6.6 的程度。audio 每次跑 0.31ms，跑的時候它的 vruntime 以 1 的速度前進，V（三個程式的加權平均）只以約 1/3 的速度前進，' +
+          '所以去睡的時候 vruntime 已經跑到 V 右邊，lag 是負的。沒有 DELAY_DEQUEUE，這個負 lag 存進 vlag，醒來原樣帶回來（還放大 1.5 倍），audio 不 eligible，deadline 再早也不會被選。' +
+          'DELAY_DEQUEUE 讓它睡著之後先留在佇列上，等 V 追上來、負的 lag 還完才真正離開，醒來時 lag 大約是 0。點 audio 醒來的那一刻，可以看到理由是「lag < 0，不 eligible」。',
+      },
+    ],
     tasks: [{ name: 'audio', nice: 0, slice: 300 * US, pattern: [{ run: 310 * US, sleep: 4730 * US }] }, hog('cc1'), hog('cc2')],
   },
   {
@@ -78,6 +148,28 @@ export const scenarios: Scenario[] = [
       'EEVDF v6.6 剛好給 10.3%，editor 平均要等 608µs。',
       'EEVDF v6.12 的結果和 v6.6 差不多（平均等 503µs），因為 editor 沒有要求短 slice。v6.12 不會自己去猜誰是互動型程式，要程式自己講。',
     ],
+    exercises: [
+      {
+        question: 'CFS 給 editor 的 CPU 比公平的份多。關掉喚醒補償 NEW_FAIR_SLEEPERS，editor 會剛好拿到公平的份嗎？',
+        variant: 'cfs-v2.6.24',
+        off: ['NEW_FAIR_SLEEPERS'],
+        task: 0,
+        answer:
+          '不會，反而掉到公平的份以下，而且每次醒來都要等好幾 ms。補償是 CFS 唯一讓睡醒的程式不吃虧的機制：拿掉之後 editor 醒來和 cc 站在同一個起跑點，' +
+          '要等 cc 用完 sched_slice 才輪得到。等待讓它的週期變長，一秒內處理的按鍵變少，CPU 比例也跟著變少。' +
+          'CFS 在這裡只有「補 20ms」和「完全不補」兩種，沒有剛好的設定。後來 v2.6.32 加了 GENTLE_FAIR_SLEEPERS，把補償減半。',
+      },
+      {
+        question: 'v6.12 的 editor 比 v6.6 少等約 100µs，但 editor 沒有設定 slice。差別是哪一個開關造成的？先關 custom_slice 看看，再改關 DELAY_DEQUEUE。',
+        variant: 'eevdf-v6.12-slice',
+        off: ['DELAY_DEQUEUE'],
+        task: 0,
+        answer:
+          '關 custom_slice 完全沒差，因為 editor 沒有用到它。關 DELAY_DEQUEUE 之後，數字和 v6.6 一模一樣，所以差別全部來自 DELAY_DEQUEUE：' +
+          'editor 睡前的負 lag 在睡著時就還掉了，醒來時 lag 大約是 0，比較常是 eligible 的。' +
+          '代價看 lag 圖：預設的 v6.12 下，editor 相對 GPS 的 lag 會往下走到約 −6ms，表示它拿得比公平的份多一點，那是睡覺時被原諒的帳。',
+      },
+    ],
     tasks: [{ name: 'editor', nice: 0, pattern: [{ run: 1.3 * MS, sleep: 8.7 * MS }] }, hog('cc1'), hog('cc2')],
   },
   {
@@ -97,6 +189,25 @@ export const scenarios: Scenario[] = [
     takeaway: [
       '三個排程器 2 秒下來的比例都準，誤差在 0.2% 以內。',
       '短時間尺度就不一樣了。CFS 一次讓一個程式跑好幾 ms，lag 擺到約 ±6ms；EEVDF 切得細，lag 都在 1ms 以內。長期公平和短期公平是兩種不同的保證。',
+    ],
+    exercises: [
+      {
+        question: '三個排程器 2 秒下來的比例都很準。在 50ms 這種短時間裡呢？先猜哪一個的 lag 擺得最大，再看三張 lag 圖（共用刻度）。',
+        task: 0,
+        width: 50,
+        answer:
+          'CFS 的鋸齒大得多。CFS 每次讓一個程式連續跑完 sched_slice（nice −5 那個一次約 14ms），這段時間另外兩個的 lag 一直往上累積；' +
+          'EEVDF 每 1ms 就重新比一次 deadline，鋸齒只有 1ms 左右高。答案的數字是每個排程器三個程式的 lag 範圍。',
+      },
+      {
+        question: '這三個程式都不睡覺。在 EEVDF v6.6 關掉 RUN_TO_PARITY，結果會改變嗎？',
+        variant: 'eevdf-v6.6',
+        off: ['RUN_TO_PARITY'],
+        task: 0,
+        answer:
+          '完全不變，每個數字都一樣。RUN_TO_PARITY 只管「有人醒來時，要不要中途重新挑」。這個情境沒有人睡覺，也就沒有人醒來，' +
+          'curr 只會在 tick 時因為 slice 用完被換下，那時本來就會重新挑。開關的效果要看工作負載，同一個開關在「延遲和公平」情境也幾乎沒差，但原因不一樣。',
+      },
     ],
     tasks: [hog('nice-5', -5), hog('nice0', 0), hog('nice5', 5)],
   },

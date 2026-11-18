@@ -7,15 +7,27 @@
     <link rel="stylesheet" href="/src/ui/style.css" />
   </head>
   <body>
-    <div class="topbar">
-      <div class="topbar-inner">
+    <header class="topbar">
+      <div class="topbar-main">
+        <a class="brand" href="#/intro" aria-label="排程器演進：回到首頁">
+          <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
+            <rect x="2" y="5" width="11" height="4.5" rx="1.5" class="bm1"/>
+            <rect x="13" y="11.75" width="8" height="4.5" rx="1.5" class="bm2"/>
+            <rect x="21" y="18.5" width="5" height="4.5" rx="1.5" class="bm3"/>
+            <rect x="13" y="5" width="13" height="4.5" rx="1.5" class="bm1 faint"/>
+            <rect x="2" y="11.75" width="11" height="4.5" rx="1.5" class="bm2 faint"/>
+          </svg>
+          <span class="brand-text"><span class="brand-name">排程器演進</span><span class="brand-sub">Linux CPU 排程器 2.4 → 6.12</span></span>
+        </a>
         <nav>
-          <span class="brand">排程器演進</span>
+          <a href="#/intro" data-page="intro">介紹</a>
+          <a href="#/learn/problem" data-page="learn">學習路線</a>
           <a href="#/sim" data-page="sim">模擬</a>
-          <a href="#/concepts" data-page="concepts">概念：lag 與 GPS</a>
           <a href="#/source" data-page="source">原始碼</a>
         </nav>
-        <div class="controls" data-for="sim">
+      </div>
+      <div class="subbar" data-for="sim">
+        <div class="controls">
           <label>情境 <select id="scenario"></select></label>
           <label>寬度
             <select id="width">
@@ -27,95 +39,519 @@
             </select>
           </label>
           <label class="grow">起點 <input id="start" type="range" min="0" max="1950" step="1" value="100" /> <output id="startOut"></output></label>
+          <label title="三個排程器的 lag 圖用同一個縱軸，振幅可以直接比；取消後各自放大"><input id="sharedLag" type="checkbox" checked /> lag 圖共用刻度</label>
+          <button type="button" id="tourBtn" class="tour-btn">導覽</button>
         </div>
       </div>
-    </div>
+    </header>
+
+    <section class="page" id="page-intro" hidden>
+      <article class="card explain intro">
+        <h1>Linux CPU 排程器演進</h1>
+        <p class="lead">Linux 的 CPU scheduler 從 2.4 一路演進到 6.12，每一代到底是怎麼決定「下一個該由哪個 task 使用 CPU」的？又為什麼要一再改寫？這個網站把同一組工作負載丟給不同年代的 CPU scheduler，並排比較它們的行為，每一次排程決策都可以點開來看理由，並對照當年的 kernel 原始碼。</p>
+        <p>試想一個情境：你一邊用 <code>make -j</code> 編譯 kernel，一邊聽音樂、在編輯器裡打字。編譯會吃掉所有拿得到的 CPU，但音樂不該斷，按下按鍵後字也該立刻出現。能不能做到，取決於 CPU scheduler 怎麼在這幾個 task 之間取捨。</p>
+
+        <h2>為什麼要了解 CPU scheduler</h2>
+        <div class="reasons" id="w-reasons">
+          <button type="button" class="reason" data-r="0"><b>作業系統觀念的集大成</b><span>task 狀態、timer interrupt、preemption、lock 與紅黑樹，都在同一段程式碼裡出現</span></button>
+          <button type="button" class="reason" data-r="1"><b>雲端資源的底層</b><span>KVM 的 vCPU、steal time、Kubernetes 的 CPU request 與 limit</span></button>
+          <button type="button" class="reason" data-r="2"><b>效能分析</b><span>程式慢，可能是在 runqueue 裡等；p99 延遲常出在這裡</span></button>
+          <button type="button" class="reason" data-r="3"><b>理論與工程的落差</b><span>比例分享有證明，kernel 卻得面對整數、tick 與相容性</span></button>
+        </div>
+        <div class="reason-body">
+          <p data-r="0">要弄懂 CPU scheduler 怎麼運作，幾乎會碰到作業系統課本的每一章：process 的狀態與 <code>task_struct</code>、驅動 tick 的 timer interrupt、context switch 與 preemption（以及哪些區段不能被搶占）、保護 runqueue 的 lock、為了常數時間挑選而設計的資料結構（O(1) 的 bitmap、CFS 的紅黑樹、EEVDF 的 augmented 紅黑樹），再往外延伸到多核的 load balancing、cache 與 NUMA 的區域性，以及省電。換句話說，讀懂 CPU scheduler，等於把這些觀念放在同一個真實的系統裡重新串起來。</p>
+          <p data-r="1" hidden>在 KVM 上，guest 的每一個 vCPU 對 host 而言只是一個普通的 thread，由 host 的 CPU scheduler 決定何時執行；guest 自己的 CPU scheduler 則在這之上再排一次，形成兩層排程。當 host 把 vCPU 超賣（oversubscription）時，guest 裡看到的 steal time，就是 vCPU 想執行卻在 host 的 runqueue 裡等待的時間。容器也是一樣：Kubernetes 的 CPU request 會轉成 cgroup 的 <code>cpu.weight</code>，本質上就是本站介紹的權重與比例分享；CPU limit 則透過 CFS bandwidth control（<code>cpu.max</code>）限制每個週期能用的時間，用完就被 throttle，這正是容器裡常見的延遲突波來源之一。本站只模擬單核、不含 cgroup，但權重、比例分享與延遲的取捨，在這些場景裡是同一套觀念。</p>
+          <p data-r="2" hidden>一個 task 經過的時間，可以拆成真正在 CPU 上執行的時間，以及想執行卻在 runqueue 裡等待的時間，後者完全由 CPU scheduler 決定。Linux 在 <code>/proc/&lt;pid&gt;/schedstat</code> 裡分別記錄這兩者，<code>perf sched latency</code> 也能列出每個 task 被喚醒後等了多久。對伺服器而言，真正讓使用者感到卡頓的往往是 p99 這類尾端延遲，而處理 request 的 thread 被喚醒後要等多久才能執行，正是 CPU scheduler 的責任；反過來說，頻繁切換 task 雖然能降低延遲，卻會增加 context switch 的成本、破壞 cache 的區域性，讓吞吐量下降。不了解 CPU scheduler 在這兩端之間怎麼取捨，看到這些數字也很難判斷問題出在哪裡。</p>
+          <p data-r="3" hidden>CPU scheduler 是作業系統裡理論與工程交會得最明顯的地方之一：比例分享（proportional share）有乾淨的數學模型，EEVDF 甚至出自 1995 年 Stoica 與 Abdel-Wahab 附有證明的論文；但 kernel 的實作必須面對整數運算、tick 的粒度、各式各樣的工作負載，以及「不能讓既有使用者變慢」的壓力。逐一比較理論模型和 kernel 實作的落差，是理解這些工程取捨最直接的方式。</p>
+        </div>
+
+        <h2>為什麼 Linux 一再改寫 CPU scheduler</h2>
+        <p>每一次大改，都是為了解決前一代暴露出的問題：task 一多，挑選的成本就失控；用 heuristics 猜測誰是 interactive，卻被輕易騙過；只追求公平，又無法表達延遲的需求。點選時間軸上的各代看設計重點。</p>
+        <div class="widget" id="w-history"></div>
+        <details class="deep">
+          <summary>回頭看這條路線</summary>
+          <p>O(1) 以前，CPU scheduler 靠 heuristics 猜測哪些 task 是 interactive；CFS 放棄猜測，只追求公平，再用喚醒補償粗略地照顧 interactive task；EEVDF 則把公平與延遲拆開，並在 v6.12 讓 task 自己表明需求。lag 這個量的命運也很有意思：v2.6.23 的 <code>wait_runtime</code> 直接記錄 lag，v2.6.24 改用 vruntime 後它不再明確存在，到了 v6.6 又以 <code>vlag</code> 的形式回來。</p>
+        </details>
+
+        <h2>怎麼使用這個網站</h2>
+        <div class="tour-cards three">
+          <a class="tcard" href="#/learn/problem"><span class="tnum">1</span><b>學習路線</b><span>八個短章，每章一個問題、一條公式、一張可以操作的小圖。從權重一路走到 EEVDF 與延遲的取捨。</span></a>
+          <a class="tcard" href="#/sim"><span class="tnum">2</span><b>模擬</b><span>三個 CPU scheduler 並排執行同一組工作負載。點時間軸看每個決策的理由，關掉 sched_feat 看差在哪裡。</span></a>
+          <a class="tcard" href="#/source"><span class="tnum">3</span><b>原始碼</b><span>task 被喚醒時放在哪裡，逐步對照 CFS 與 EEVDF 當年的 kernel 程式碼。</span></a>
+        </div>
+        <p class="next"><a href="#/learn/problem">從第 1 章開始<span class="arrow" aria-hidden="true">→</span></a></p>
+
+        <details class="deep refs-box">
+          <summary>延伸閱讀</summary>
+          <ul class="refs">
+            <li><a href="https://hackmd.io/@sysprog/linux-scheduler-0" target="_blank" rel="noopener">Linux 核心設計: CPU Scheduler</a>（sysprog 講義系列）：從概論、O(1)、CFS、EEVDF 到 sched_ext、SCHED_DEADLINE 與 PREEMPT_RT，比本站涵蓋的範圍廣得多。</li>
+            <li>I. Stoica, H. Abdel-Wahab, “Earliest Eligible Virtual Deadline First: A Flexible and Accurate Mechanism for Proportional Share Resource Allocation,” 1995：EEVDF 的原始論文。</li>
+            <li><a href="https://lwn.net/Articles/925371/" target="_blank" rel="noopener">LWN: An EEVDF CPU scheduler for Linux</a>（2023）：EEVDF 合併前的背景與動機。</li>
+          </ul>
+        </details>
+      </article>
+    </section>
+
+    <section class="page" id="page-learn" hidden>
+      <div class="learn">
+        <aside class="toc" aria-label="章節"><ol id="learnToc"></ol></aside>
+        <div class="chapters">
+
+      <article class="card explain chapter" data-ch="problem" data-title="CPU scheduler 要解決什麼問題" data-q="只有一顆 CPU，該讓誰先執行？">
+        <p>系統只有一顆 CPU，上面同時有好幾個 task（執行中的程式，以下都用 task 稱呼）。任何時刻只有一個 task 能在 CPU 上執行，其他想執行的 task 只能在 runqueue 裡排隊；還有一些 task 正在等待鍵盤輸入、磁碟或計時器，處於 sleep 狀態，暫時不需要 CPU。</p>
+        <figure class="dg">
+          <svg viewBox="0 0 640 210" role="img" aria-label="程式的三種狀態與轉換">
+            <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="dg-head"/></marker></defs>
+            <rect class="dg-box run" x="250" y="14" width="140" height="44" rx="8"/>
+            <text class="dg-t" x="320" y="34" text-anchor="middle">在跑</text>
+            <text class="dg-s" x="320" y="50" text-anchor="middle">時間軸上的深色</text>
+            <rect class="dg-box wait" x="40" y="146" width="150" height="44" rx="8"/>
+            <text class="dg-t" x="115" y="166" text-anchor="middle">想跑，在排隊</text>
+            <text class="dg-s" x="115" y="182" text-anchor="middle">淺色</text>
+            <rect class="dg-box" x="450" y="146" width="150" height="44" rx="8"/>
+            <text class="dg-t" x="525" y="166" text-anchor="middle">睡覺</text>
+            <text class="dg-s" x="525" y="182" text-anchor="middle">空白</text>
+            <line class="dg-a" x1="150" y1="146" x2="258" y2="60" marker-end="url(#arr)"/>
+            <text class="dg-l" x="150" y="96" text-anchor="end">被選中</text>
+            <line class="dg-a" x1="282" y1="60" x2="178" y2="146" marker-end="url(#arr)"/>
+            <text class="dg-l" x="242" y="120">被換下</text>
+            <text class="dg-s" x="242" y="135">（時間用完、有人插隊）</text>
+            <line class="dg-a" x1="370" y1="60" x2="490" y2="146" marker-end="url(#arr)"/>
+            <text class="dg-l" x="446" y="96">自己去睡</text>
+            <line class="dg-a" x1="450" y1="174" x2="192" y2="174" marker-end="url(#arr)"/>
+            <text class="dg-l" x="321" y="166" text-anchor="middle">醒來</text>
+          </svg>
+          <figcaption>CPU scheduler 會在三種時機重新挑選：目前的 task 自己進入 sleep，CPU 空了出來；每 1ms 一次的 tick，檢查目前的 task 是否已經用完該分到的時間；有 task 被喚醒（或剛建立），判斷是否要讓它搶占（preempt）目前的 task。</figcaption>
+        </figure>
+        <p>那麼該挑誰呢？這取決於 task 需要什麼。像播放音樂、文字編輯器這類 interactive 的 task，平常大多在 sleep，每次醒來只用一點點 CPU，但必須馬上得到執行，否則就會聽到斷音、看到畫面卡頓，因此它們在意的是<b>延遲</b>（latency）。相對地，編譯這類 CPU-bound 的 task 永遠有事可做，晚個幾毫秒執行並無所謂，它們在意的是一段時間下來是否拿到<b>公平</b>的 CPU 份額。</p>
+        <p>麻煩的是，這兩種需求會互相拉扯：讓音樂播放器插隊固然降低了延遲，但它插隊所用的時間，其實是從編譯 task 那裡拿走的。接下來幾章先把「公平」定義清楚，再看 CFS 和 EEVDF 怎麼在公平之上處理延遲。</p>
+      </article>
+
+      <article class="card explain chapter" data-ch="weight" data-title="公平的定義：權重" data-q="每個 task 應該分到多少 CPU？">
+        <p>要談公平，得先定義每個 task 應該分到多少。Linux 讓使用者用 nice 值（−20 到 19）表達優先程度，nice 越小越優先。kernel 用 <code>prio_to_weight[]</code> 這張表把 nice 換成權重 <span class="tex">w</span>，表的設計是 nice 0 對應 1024，每差一級約差 1.25 倍：</p>
+        <div class="tex-block">w(\text{nice}) \approx \frac{1024}{1.25^{\,\text{nice}}}</div>
+        <p>例如 nice 5 是 <span class="tex">1024 / 1.25^5 \approx 335</span>，nice −5 是 <span class="tex">1024 \times 1.25^5 \approx 3121</span>（表裡存的是取整後的值）。有了權重，公平就能寫成一條式子：task <span class="tex">i</span> 應得的 CPU 比例是</p>
+        <div class="tex-block">\text{share}_i = \frac{w_i}{W}, \qquad W = \sum_{j \,\in\, \text{runnable}} w_j</div>
+        <p><span class="tex">W</span> 只加總想執行（runnable）的 task。sleep 中的 task 不算在內，所以有 task 睡著時，其他 task 的比例會跟著變大。下圖預設的 A、B、C 是 nice −5、0、5，A 應得</p>
+        <div class="tex-block">\text{share}_A = \frac{3121}{3121 + 1024 + 335} = \frac{3121}{4480} \approx 69.7\%</div>
+        <p>拖動 nice 值，圖下方會代入新的數字重算：</p>
+        <div class="widget" id="w-weight"></div>
+      </article>
+
+      <article class="card explain chapter" data-ch="lag" data-title="理想的參考：GPS 與 lag" data-q="怎麼量一個 CPU scheduler 離公平多遠？">
+        <p>理想情況下，想執行的 task 會「同時」以各自的比例前進，就像水流同時分給幾根管子。這個假想的模型稱為 GPS（Generalized Processor Sharing）。在 GPS 裡，經過時間 <span class="tex">t</span>，task <span class="tex">i</span> 應該拿到的 CPU 時間是（假設這段期間想執行的 task 沒有變）</p>
+        <div class="tex-block">S_i = \frac{w_i}{W}\, t</div>
+        <p>真實的 CPU 一次只能執行一個 task，CPU scheduler 只能讓它們輪流執行。把 task <span class="tex">i</span> 實際拿到的時間記為 <span class="tex">s_i</span>，兩者的差就是 lag：</p>
+        <div class="tex-block">\text{lag}_i = S_i - s_i</div>
+        <p>lag 為正，表示 CPU scheduler 欠它；為負，表示它多拿了。舉個例子：三個 nice 0 的 task 都想執行，CPU scheduler 讓 A 連續跑 1ms。這 1ms 內 GPS 會給每個 task <span class="tex">\tfrac{1}{3}</span> ms：</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>task</th><th><span class="tex">S_i</span>（GPS 應給）</th><th><span class="tex">s_i</span>（實際）</th><th><span class="tex">\text{lag}_i = S_i - s_i</span></th></tr></thead>
+          <tbody>
+            <tr><td>A</td><td><span class="tex">\tfrac{1}{3}</span> ms</td><td>1 ms</td><td><span class="tex">-\tfrac{2}{3}</span> ms</td></tr>
+            <tr><td>B</td><td><span class="tex">\tfrac{1}{3}</span> ms</td><td>0</td><td><span class="tex">+\tfrac{1}{3}</span> ms</td></tr>
+            <tr><td>C</td><td><span class="tex">\tfrac{1}{3}</span> ms</td><td>0</td><td><span class="tex">+\tfrac{1}{3}</span> ms</td></tr>
+          </tbody>
+        </table>
+        <p>接著換 B 跑 1ms、再換 C 跑 1ms。每過 1ms，跑的那個 lag 減 <span class="tex">\tfrac{2}{3}</span>，等的兩個各加 <span class="tex">\tfrac{1}{3}</span>。到 3ms 時三個 task 各跑了 1ms，剛好等於 GPS 給的，lag 全部回到 0。</p>
+        <figure class="dg">
+          <svg viewBox="0 0 640 250" role="img" aria-label="三個 task 輪流跑 1ms 時的 lag">
+            <text class="dg-n" x="100" y="27" text-anchor="end">A</text>
+            <text class="dg-n" x="100" y="45" text-anchor="end">B</text>
+            <text class="dg-n" x="100" y="63" text-anchor="end">C</text>
+            <rect class="dg-bar s1" x="110" y="16" width="160" height="14"/>
+            <rect class="dg-bar s2" x="270" y="34" width="160" height="14"/>
+            <rect class="dg-bar s3" x="430" y="52" width="160" height="14"/>
+            <text class="dg-s" x="20" y="80">真實 CPU：一次一個</text>
+            <text class="dg-s" x="20" y="150">lag</text>
+            <text class="dg-s" x="104" y="94" text-anchor="end">+2/3</text>
+            <text class="dg-s" x="104" y="154" text-anchor="end">0</text>
+            <text class="dg-s" x="104" y="214" text-anchor="end">−2/3</text>
+            <line class="dg-axis" x1="110" x2="590" y1="150" y2="150"/>
+            <line class="dg-grid" x1="270" x2="270" y1="10" y2="220"/>
+            <line class="dg-grid" x1="430" x2="430" y1="10" y2="220"/>
+            <line class="dg-grid" x1="590" x2="590" y1="10" y2="220"/>
+            <polyline class="dg-lag s1" points="110,150 270,210 430,180 590,150"/>
+            <polyline class="dg-lag s2" points="110,150 270,120 430,180 590,150"/>
+            <polyline class="dg-lag s3" points="110,150 270,120 430,90 590,150"/>
+            <text class="dg-s" x="110" y="240" text-anchor="middle">0</text>
+            <text class="dg-s" x="270" y="240" text-anchor="middle">1ms</text>
+            <text class="dg-s" x="430" y="240" text-anchor="middle">2ms</text>
+            <text class="dg-s" x="590" y="240" text-anchor="middle">3ms</text>
+          </svg>
+          <figcaption>上：誰在 CPU 上。下：三條 lag 線，顏色同上。在跑的那條以 2/3 的斜率往下，等的兩條以 1/3 往上；任何時刻三條加起來都是 0。</figcaption>
+        </figure>
+        <p>模擬頁每個 CPU scheduler 底下的那張圖，畫的就是這個量。看圖時要分辨一時的鋸齒和長期的漂移：鋸齒是輪流執行必然的結果，一條線如果一路往下、沒有回來，才表示那個 task 長期拿得比公平的份多。</p>
+
+        <details class="deep">
+          <summary>深入：想執行的 task 會變時，GPS 怎麼定義</summary>
+          <p>上面的 <span class="tex">S_i = \frac{w_i}{W} t</span> 假設 <span class="tex">W</span> 不變。一般的定義是用速度來寫：時刻 <span class="tex">\tau</span> 所有想執行的 task 權重加起來是 <span class="tex">W(\tau)</span>，task <span class="tex">i</span> 這一刻拿到 CPU 的速度是</p>
+          <div class="tex-block">\frac{dS_i}{d\tau} = \begin{cases} \dfrac{w_i}{W(\tau)} & i \text{ 想執行} \\[6pt] 0 & i \text{ 在 sleep} \end{cases}</div>
+          <p>把速度從 0 積到 <span class="tex">t</span>，就是 GPS 到時刻 <span class="tex">t</span> 為止會給 <span class="tex">i</span> 的 CPU 時間 <span class="tex">S_i(t)</span>。task 在 sleep 時 GPS 不分 CPU 給它，<span class="tex">S_i</span> 和 <span class="tex">s_i</span> 都不動，所以 lag 停在睡前的值，醒來接著算。這是一個選擇，不是唯一的算法；第 8 章會看到 CFS 和 v6.12 在這裡的做法不一樣。</p>
+        </details>
+        <details class="deep">
+          <summary>深入：為什麼是鋸齒，鋸齒能有多高</summary>
+          <p>把定義對時間微分。GPS 給的速度是 <span class="tex">w_i / W</span>；真實的 CPU scheduler 給的速度不是 1 就是 0，看 task 在不在 CPU 上。所以想執行的 task，lag 的斜率只有兩種：</p>
+          <div class="tex-block">\frac{d\,\text{lag}_i}{dt} = \frac{w_i}{W} - \frac{ds_i}{dt} = \begin{cases} \dfrac{w_i}{W} - 1 & i \text{ 在 CPU 上} \\[6pt] \dfrac{w_i}{W} & i \text{ 在排隊} \end{cases}</div>
+          <p>三個 nice 0 時 <span class="tex">w_i / W = \tfrac{1}{3}</span>，跑的那個以 <span class="tex">-\tfrac{2}{3}</span> 的斜率往下，等的兩個以 <span class="tex">+\tfrac{1}{3}</span> 往上。換人執行，斜率就翻過來，所以每條線都是一段一段的折線。</p>
+          <p>鋸齒的高度取決於 CPU scheduler 一次讓一個 task 連續執行多久。task 連續執行 <span class="tex">q</span>，lag 就下降 <span class="tex">q\,(1 - w_i/W)</span>：兩個 nice 0 的 hog 在 CFS v2.6.24 下 <code>sched_slice()</code> 是 10ms，但 <code>check_preempt_tick()</code> 的條件是「超過」，第 10 個 tick 剛好等於、不換人，實際跑到 11ms，所以 lag 擺到 <span class="tex">11 \times \tfrac{1}{2} = 5.5</span> ms；EEVDF 每 1ms 換一次，只擺 <span class="tex">1 \times \tfrac{1}{2} = 0.5</span> ms。EEVDF 論文證明 lag 的上下界和 request 大小有關：</p>
+          <div class="tex-block">-r_{\max} \;<\; \text{lag}_i \;<\; \max(r_{\max},\, q)</div>
+          <p><span class="tex">r_{\max}</span> 是最大的 request（一次要求的執行長度），<span class="tex">q</span> 是排程的時間單位。模擬裡實際的 request 被 1ms 的 tick 放大成 1ms，量到的 lag 都在 ±1ms 內。</p>
+        </details>
+        <details class="deep">
+          <summary>深入：為什麼所有 lag 加起來永遠是 0</summary>
+          <p>只要有 task 想執行，真實的 CPU scheduler 和 GPS 都不會讓 CPU 閒著，所以同一段時間兩邊發出去的 CPU 總量一樣多。把所有想執行的 task 加起來：</p>
+          <div class="tex-block">\sum_i \frac{dS_i}{dt} = \sum_i \frac{w_i}{W} = 1, \qquad \sum_i \frac{ds_i}{dt} = 1 \quad\Longrightarrow\quad \frac{d}{dt}\sum_i \text{lag}_i = 0</div>
+          <p>sleep 中的 task 兩邊都是 0，lag 不動，也不影響總和。一開始大家的 lag 都是 0，所以總和永遠是 0：有人多拿，就一定有人少拿。因此看圖時不能只看一條線，audio 往下多少，cc1 和 cc2 合起來就往上多少。第 6 章會看到，EEVDF 的 <span class="tex">V</span> 正是靠這個性質算出來的。</p>
+        </details>
+      </article>
+
+      <article class="card explain chapter" data-ch="cfs" data-title="CFS：讓 vruntime 齊頭並進" data-q="只記一個數字，能不能做到公平？">
+        <p>CFS 的想法是替每個 task 記錄一個 virtual runtime（<code>vruntime</code>，以下記為 <span class="tex">v_i</span>）。task 每執行 <span class="tex">\Delta t</span>，<code>update_curr()</code> 就把它的 vruntime 加上</p>
+        <div class="tex-block">\Delta v_i = \Delta t \times \frac{1024}{w_i}</div>
+        <p>也就是實際執行時間除以「權重是 nice 0 的幾倍」（<span class="tex">w_i / 1024</span>）。同樣執行 1ms：</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>nice</th><th><span class="tex">w_i</span></th><th><span class="tex">1024 / w_i</span></th><th>執行 1ms，vruntime 增加</th></tr></thead>
+          <tbody>
+            <tr><td>−5</td><td>3121</td><td>0.33</td><td>0.33 ms</td></tr>
+            <tr><td>0</td><td>1024</td><td>1</td><td>1 ms（等於實際時間）</td></tr>
+            <tr><td>5</td><td>335</td><td>3.06</td><td>3.06 ms</td></tr>
+          </tbody>
+        </table>
+        <p>挑選的規則只有一條：選 vruntime 最小的 task。</p>
+        <div class="tex-block">\text{pick} = \mathop{\arg\min}_{i} \; v_i</div>
+        <p>權重小的 task 執行一下 vruntime 就跑到前面去，得等其他 task 追上來才會再輪到它。長期下來每個 task 的 vruntime 會彼此貼近，而 vruntime 相等正好就是公平。從 0 開始累計時 <span class="tex">v_i = t_i \times 1024 / w_i</span>（<span class="tex">t_i</span> 是實際執行時間），所以</p>
+        <div class="tex-block">v_A = v_B \;\Longrightarrow\; \frac{1024\, t_A}{w_A} = \frac{1024\, t_B}{w_B} \;\Longrightarrow\; \frac{t_A}{t_B} = \frac{w_A}{w_B}</div>
+        <p>執行時間的比例等於權重的比例，也就是第 2 章的 <span class="tex">\text{share}_i = w_i / W</span>。下圖的 A、B 是 nice 0，C 是 nice 5，照公式 C 應得 <span class="tex">335 / (1024 + 1024 + 335) \approx 14.1\%</span>。</p>
+        <div class="widget" id="w-cfs"></div>
+        <p class="try">按幾次「跑 20ms」，觀察 nice 5 的 C 分到多少；接著讓 A 進入 sleep，跑個 60ms 後再喚醒它，看看它的 vruntime 被放在哪裡，以及醒來後連續執行了多久。</p>
+
+        <h2>sleep 帶來的問題</h2>
+        <p>task 在 sleep 時不執行，vruntime 也停住不動，其他 task 的 vruntime 卻繼續往前走。假設 A 睡了 <span class="tex">T</span>，這段期間有 <span class="tex">n</span> 個 nice 0 的 task 平分 CPU，每個拿到 <span class="tex">T/n</span>，vruntime 也各前進 <span class="tex">T/n</span>。A 醒來時落後</p>
+        <div class="tex-block">\Delta v = \frac{T}{n}</div>
+        <p>若照規則直接挑 vruntime 最小的，A 醒來後只要還有事做，每次都會被選中，直到追上為止。例如三個編譯 task 在跑，A 睡了 3 秒，醒來時落後 <span class="tex">3/3 = 1</span> 秒；如果 A 醒來後是一段 CPU-bound 的計算，三個編譯 task 就得整整停住 1 秒。睡得越久，其他 task 停得越久，而且沒有上限。這種「想執行，卻長時間拿不到 CPU」的情況稱為 starvation。</p>
+        <p>CFS 的做法是限制醒來時落後的幅度。喚醒時 <code>place_entity()</code> 重新安排它的 vruntime：</p>
+        <div class="tex-block">v_i \leftarrow \max\bigl(v_i,\; \texttt{min\_vruntime} - 20\,\text{ms}\bigr)</div>
+        <p><code>min_vruntime</code> 大致是 runqueue 上最小的 vruntime，20ms 是 <code>sysctl_sched_latency</code>。取 max 的效果分兩種情況（數值以 <code>min_vruntime</code> 為 0）：</p>
+        <table class="mini eq-ex">
+          <thead><tr><th></th><th>醒來時的 <span class="tex">v_i</span></th><th>候選位置</th><th>放回的位置</th></tr></thead>
+          <tbody>
+            <tr><td>只睡一下</td><td>−5 ms</td><td>−20 ms</td><td>−5 ms（不變）</td></tr>
+            <tr><td>睡了很久</td><td>−60 ms</td><td>−20 ms</td><td>−20 ms（被拉上來）</td></tr>
+          </tbody>
+        </table>
+        <p>不管睡了多久，醒來的 task 最多只領先 <code>min_vruntime</code> 20ms，所以它一次能「討回」的 CPU 有了上限，其他 task 不會再被餓上一整秒。換個角度看，這 20ms 是給 sleeper 的補償，interactive task 醒來後通常因此能立刻搶占；代價是它分到的 CPU 可能比公平的份額還多，而睡前被欠的、超過 20ms 的部分則直接一筆勾銷。</p>
+        <details class="deep">
+          <summary>深入：starvation 與 aging，其他 CPU scheduler 怎麼處理</summary>
+          <p>避免 starvation 是 CPU scheduler 的基本要求之一：每個 runnable 的 task 終究要被執行，而且等待的時間要有上限。starvation 常出現在下面這類挑選規則：</p>
+          <ul>
+            <li>嚴格的優先權排程：只要還有高優先權的 task 想執行，低優先權的 task 就永遠輪不到。</li>
+            <li>SJF（Shortest Job First）：短工作源源不絕地進來時，長工作會一直被往後排。</li>
+            <li>挑「被虧欠最多」的 task，但虧欠沒有上限：就是上面 vruntime 的情況。被虧欠的一方一次把帳討回來，其他 task 在這段期間被餓著。</li>
+          </ul>
+          <p>作業系統課本上的典型解法是 aging：task 等得越久，優先權就逐漸提高，最後一定輪得到。以 2.6 的 O(1) 為例，interactive 的 task 用完 time slice 後可以留在優先的佇列裡繼續插隊；為了不讓其他 task 一直等，<code>EXPIRED_STARVING()</code> 會檢查被排到後面的 task 等了多久，超過 <code>STARVATION_LIMIT</code> 乘上 runqueue 上的 task 數，就取消這個優待（v2.6.12 <code>kernel/sched.c</code> 的註解寫的就是 “To guarantee that this does not starve expired tasks”）。</p>
+        </details>
+        <p class="fine">簡化：小圖每 1ms 重新挑選一次。實際的 CFS 會讓 task 跑完一段 <code>sched_slice()</code> 才切換，被喚醒的 task 也要落後超過一定門檻才會搶占（第 7 章）。</p>
+      </article>
+
+      <article class="card explain chapter" data-ch="why" data-title="為什麼離開 CFS" data-q="CFS 已經很公平了，為什麼還要換掉？">
+        <p>先說清楚「離開」的範圍。v6.6 換掉的是 CFS 挑選、放置與搶占的規則，<code>sched_entity</code>、vruntime、紅黑樹、<code>kernel/sched/fair.c</code> 和 cgroup 的群組排程都還在；被拿掉的是「選 vruntime 最小的」這條規則，以及外面那一圈為了照顧延遲而長出來的 heuristics。</p>
+        <p>問題也不在公平。上一章推過，vruntime 相等就是公平，本站情境 5 量到的 CPU 比例和理論值相差不到 0.01%。CFS 的麻煩在於延遲沒有正式的位置，以下照 mailing list 上的討論，把理由一個一個拆開來看。</p>
+
+        <h2>只有一個參數：權重</h2>
+        <p>Peter Zijlstra 在合併進 kernel 的 EEVDF commit 裡，第一句話就是：</p>
+        <blockquote>Where CFS is currently a WFQ based scheduler with only a single knob, the weight. The addition of a second, latency oriented parameter, makes something like WF2Q or EEVDF based a much better fit.</blockquote>
+        <p>回頭看第 4 章的式子，CFS 裡 task 唯一能影響的是 vruntime 前進的斜率：</p>
+        <div class="tex-block">\Delta v_i = \Delta t \times \frac{1024}{w_i}</div>
+        <p>nice 改變的是 <span class="tex">w_i</span>，也就是長期能拿到多少 CPU，而不是醒來後多快能執行。LWN 的說法是 “nice values (priorities) can be used to give a process more CPU time, but that is not the same thing.”。試想一個 audio task，它每 5ms 只需要一點點 CPU，但要準時；把它的 nice 調低，它會拿到更多用不完的份額，延遲卻沒有直接的保證。EEVDF 多了第二個參數 <span class="tex">r_i</span>（request，也就是 slice），延遲由 deadline 決定，和權重分開：</p>
+        <div class="tex-block">d_i = v_i + r_i \times \frac{1024}{w_i}</div>
+        <table class="mini eq-ex">
+          <thead><tr><th></th><th>CFS</th><th>EEVDF</th></tr></thead>
+          <tbody>
+            <tr><td>公平（長期拿多少）</td><td>權重 <span class="tex">w_i</span></td><td>權重 <span class="tex">w_i</span></td></tr>
+            <tr><td>延遲（多快輪到）</td><td>沒有參數，靠 heuristics</td><td>request <span class="tex">r_i</span> → deadline</td></tr>
+          </tbody>
+        </table>
+
+        <h2>延遲靠 heuristics 撐著</h2>
+        <p>既然延遲沒有參數，CFS 只能在周邊補規則。下表比較 CFS 的最後一版 v6.5 和 v6.6 的 <code>kernel/sched/features.h</code> 與 <code>fair.c</code>（兩版都在本站的 <code>kernel-src/</code> 裡）：</p>
+        <table class="mini eq-ex wrap">
+          <thead><tr><th>v6.5 的機制</th><th>做什麼</th><th>v6.6</th></tr></thead>
+          <tbody>
+            <tr><td>喚醒補償 + <code>GENTLE_FAIR_SLEEPERS</code></td><td>醒來的 task 放到 <code>min_vruntime</code> 減 <code>sysctl_sched_latency</code> 的一半</td><td>移除，改成睡前存 lag、醒來還回去（<code>PLACE_LAG</code>）</td></tr>
+            <tr><td><code>START_DEBIT</code></td><td>新 task 先往右放一段，不讓它一來就插隊</td><td>移除</td></tr>
+            <tr><td><code>sysctl_sched_wakeup_granularity</code></td><td>醒來的 task 要領先超過門檻才能搶占</td><td>移除，改成重新挑一次、比 deadline</td></tr>
+            <tr><td><code>sysctl_sched_latency</code>、<code>sysctl_sched_min_granularity</code>、<code>sched_nr_latency</code></td><td>依 task 數算出 <code>sched_slice()</code></td><td>移除，一律用 <code>sysctl_sched_base_slice</code>（0.75ms）</td></tr>
+            <tr><td><code>LAST_BUDDY</code></td><td>搶占後優先讓剛被換下的 task 回來，為了 cache 區域性</td><td>移除（<code>NEXT_BUDDY</code> 留著，預設關閉）</td></tr>
+          </tbody>
+        </table>
+        <p>這些規則各自都有道理，例如 v6.5 的註解寫 <code>GENTLE_FAIR_SLEEPERS</code> 是 “Only give sleepers 50% of their service deficit”。但它們疊在一起就很難分析：補償送多少、門檻設多大，都是調出來的經驗值，彼此還會互相影響。光是喚醒補償，從 v2.6.24 的 20ms 到 v6.5 的 <span class="tex">6\,\text{ms} \times \tfrac{1}{2} = 3\,\text{ms}</span>（單核時），數字就一路在變。</p>
+        <p>本站量到的結果也說明了這種補償有多粗：情境 2 跑 1 秒，CFS v2.6.24 下 editor 相對 GPS 的 lag 累積到 −75.6ms，而且 editor 第一次長睡之後，每次醒來都貼著 −20ms 的上限，短睡也一樣。補償不管 task 睡前是被欠還是多拿，一律照送。Zijlstra 在第一版 EEVDF patch 的 cover letter 寫的就是想刪掉這些程式碼：“if we can pull this off we can delete a whole much of icky heuristics code”。最後合併的 commit「sched/fair: Commit to EEVDF」只有兩句說明：</p>
+        <blockquote>EEVDF is a better defined scheduling policy, as a result it has less heuristics/tunables. There is no compelling reason to keep CFS around.</blockquote>
+
+        <h2>先試過的路：latency-nice</h2>
+        <p>在 EEVDF 之前，社群已經有一套讓 task 表達延遲需求的 patch：Parth Shah 加入 per-task 的 latency-nice 屬性，Vincent Guittot 加入 <code>latency_offset</code>，讓延遲敏感的 task 醒來時可以插隊。這套 patch 能用，但做法是在 CFS 旁邊再維護一棵依延遲排序的樹。Zijlstra 的回應是：</p>
+        <blockquote>Ever since looking at the latency-nice patches, I've wondered if EEVDF would not make more sense</blockquote>
+        <p>他在同一封信裡也直說 “I really dislike the dual tree”，不喜歡為了延遲另外維護一棵樹。</p>
+        <p>他的判斷是：與其在只有一個參數的 CFS 外面再加一層延遲機制，不如換成本來就有兩個參數的演算法。EEVDF 出自 1995 年 Stoica 與 Abdel-Wahab 的論文，lag 有證明過的上下界（第 3 章），搶占的規則也前後一致：tick 時看 slice 用完沒，喚醒時重新挑一次看 deadline（第 7 章），不再需要 wakeup granularity 這類門檻。</p>
+
+        <h2>代價：真正的公平讓一些 workload 變慢</h2>
+        <p>換掉 heuristics 不是沒有代價。第二版 patch 原本想保留類似 sleeper bonus 的放置方式（<code>PLACE_BONUS</code>），Zijlstra 形容它是 “a mixed bag of pain”：EEVDF 照權重算，一個 100% 忙碌的 parent 和一個 50% 忙碌的 child 會分到 67% / 33%，而 CFS 的 sleeper bonus 讓它們拿到 50% / 50%。stress-futex、stress-nanosleep 這類 benchmark 原本受惠於 CFS 多送的那份 CPU，換成 EEVDF 就變慢；可是保留 bonus，又會把 task 放得太靠左，弄壞 hackbench 和 latency-nice。最後 bonus 沒有留下。</p>
+        <p>各方的測試結果也是有贏有輸。Chen Yu 量到 schbench 的 95 百分位延遲降了七、八成；IBM 的 Shrikanth Hegde 在 POWER 上量到 daytrader 的吞吐量多了 7%～9%，但「4 X Shell Scripts」少了 53%，他自己標註 “This is a concerning one.”。第三版的 cover letter 總結是 “what was found was better latency and smaller variance”。也就是說，延遲和穩定度變好了，部分仰賴 sleeper 補償的吞吐量型 workload 付了代價，這和第 8 章的取捨是同一件事。</p>
+
+        <h2>介面：從 latency-nice 到 slice</h2>
+        <p>第三版時有人反對 latency-nice 這個介面，Zijlstra 改提「直接讓 task 宣告 slice 長度」，用 <code>sched_attr::sched_runtime</code> 傳進來。v6.6 合併的是沒有這個介面的版本，所以 v6.6 裡大家的 slice 都是 0.75ms，第 6 章會看到這讓 audio 的 deadline 不會比較早。per-task slice 要到 v6.12 才進來，同時補上 <code>DELAY_DEQUEUE</code>；本站的筆記發現，少了後者，短 slice 幾乎沒有效果。</p>
+
+        <details class="deep">
+          <summary>深入：mailing list 上的時間線</summary>
+          <ul>
+            <li>2023-03-06，v1「sched: EEVDF using latency-nice」：EEVDF 是 CFS 旁邊的一個 <code>sched_feat</code> 選項，benchmark “a bunch of wins and losses, but nothing that indicates a total fail”。</li>
+            <li>2023-03-28，v2：“it now fully replaces CFS”，加入 lag based placement（v6.6 的 <code>vlag</code>），<code>PLACE_BONUS</code> 的問題浮現。</li>
+            <li>2023-05-31，v3「EEVDF and latency-nice and/or slice-attr」：修正 tick 搶占，提出用 <code>sched_attr</code> 宣告 slice 的替代介面。</li>
+            <li>2023-10，v6.6 發布：EEVDF 取代 CFS 的挑選規則，沒有 per-task slice。</li>
+            <li>2024-04，RFC「sched/fair: Complete EEVDF」：custom slice、<code>DELAY_DEQUEUE</code> 等，後來進入 v6.12。</li>
+          </ul>
+        </details>
+        <details class="deep">
+          <summary>原始出處</summary>
+          <ul class="refs">
+            <li><a href="https://lkml.iu.edu/hypermail/linux/kernel/2303.0/05235.html" target="_blank" rel="noopener">[PATCH 00/10] sched: EEVDF using latency-nice</a>（v1 cover letter）</li>
+            <li><a href="https://lkml.iu.edu/hypermail/linux/kernel/2303.0/05229.html" target="_blank" rel="noopener">[PATCH 10/10] sched/fair: Implement an EEVDF like policy</a></li>
+            <li><a href="https://lkml.iu.edu/hypermail/linux/kernel/2303.3/04415.html" target="_blank" rel="noopener">[PATCH 00/17] sched: EEVDF using latency-nice</a>（v2，PLACE_BONUS 與 Chen Yu 的數據）</li>
+            <li><a href="https://lkml.iu.edu/2304.0/00903.html" target="_blank" rel="noopener">Re: [PATCH 00/17]</a>（Shrikanth Hegde 的 POWER 測試）</li>
+            <li><a href="https://lkml.iu.edu/hypermail/linux/kernel/2305.3/08690.html" target="_blank" rel="noopener">[PATCH 00/15] sched: EEVDF and latency-nice and/or slice-attr</a>（v3）</li>
+            <li><a href="https://lkml.iu.edu/hypermail/linux/kernel/2404.0/06451.html" target="_blank" rel="noopener">[RFC][PATCH 00/10] sched/fair: Complete EEVDF</a>（2024）</li>
+            <li><a href="https://github.com/torvalds/linux/commit/147f3efaa24182a21706bca15eab2f3f4630b5fe" target="_blank" rel="noopener">commit 147f3efaa241</a>「sched/fair: Implement an EEVDF-like scheduling policy」、<a href="https://github.com/torvalds/linux/commit/5e963f2bd4654a202a8a05aa3a86cb0300b10e6c" target="_blank" rel="noopener">commit 5e963f2bd465</a>「sched/fair: Commit to EEVDF」</li>
+            <li><a href="https://lwn.net/Articles/925371/" target="_blank" rel="noopener">LWN: An EEVDF CPU scheduler for Linux</a></li>
+          </ul>
+        </details>
+      </article>
+
+      <article class="card explain chapter" data-ch="eevdf" data-title="EEVDF：先看 eligible，再比 deadline" data-q="公平和延遲，能不能分開處理？">
+        <p>CFS 用一個 vruntime 同時處理公平與延遲，但這兩者其實是不同的需求。v6.6 引入的 EEVDF 把它們拆開處理：它同樣使用 vruntime，但多了兩個量。第一個是 <span class="tex">V</span>，所有可執行 task 的 vruntime 依權重的平均（<code>avg_vruntime()</code>）：</p>
+        <div class="tex-block">V = \frac{\sum_i w_i\, v_i}{\sum_i w_i}</div>
+        <p>vruntime 落在 <span class="tex">V</span> 左邊，表示依權重計算它執行得比平均少，被虧欠了。kernel 拿 <span class="tex">V</span> 估計 lag，於是「lag ≥ 0」可以直接比 vruntime 和 <span class="tex">V</span> 判斷。這樣的 task 稱為 eligible，只有 eligible 的 task 可以被選：</p>
+        <div class="tex-block">\text{lag}_i = \frac{w_i}{1024}\,(V - v_i) \;\ge\; 0 \quad\Longleftrightarrow\quad v_i \le V</div>
+        <p>第二個是 deadline。slice 是 task 一次想連續執行的長度，deadline 等於 vruntime 加上 slice 換算成的虛擬時間，換算方式和 vruntime 相同：</p>
+        <div class="tex-block">d_i = v_i + \text{slice}_i \times \frac{1024}{w_i}</div>
+        <p>挑選規則是：在 eligible 的 task 中，選 deadline 最早的。</p>
+        <div class="tex-block">\text{pick} = \mathop{\arg\min}_{i \,:\, v_i \le V} \; d_i</div>
+        <p>把下圖的預設值代進去。三個 task 都是 nice 0，所以 <span class="tex">1024 / w_i = 1</span>，<span class="tex">V</span> 就是 vruntime 的平均：</p>
+        <div class="tex-block">V = \frac{-0.30 + 0.35 - 0.05}{3} = 0</div>
+        <table class="mini eq-ex">
+          <thead><tr><th>task</th><th><span class="tex">v_i</span></th><th>eligible（<span class="tex">v_i \le V</span>）</th><th><span class="tex">\text{slice}_i</span></th><th><span class="tex">d_i</span></th></tr></thead>
+          <tbody>
+            <tr><td>A</td><td>−0.30</td><td>是</td><td>0.75</td><td>0.45</td></tr>
+            <tr><td>B</td><td>+0.35</td><td>否</td><td>0.75</td><td>1.10</td></tr>
+            <tr class="picked"><td>C</td><td>−0.05</td><td>是</td><td>0.30</td><td>0.25（最早，選中）</td></tr>
+          </tbody>
+        </table>
+        <p>單位都是 ms。A、C 是 eligible，其中 C 的 deadline 最早，所以選 C。B 不 eligible，deadline 再早也不會被選。</p>
+        <div class="widget" id="w-eevdf"></div>
+        <p class="try">把 C 的 slice 拉到 0.5ms 以上，被選中的就會換成 A；把 B 的 slice 拉到最短，B 依然不能被選，因為它不 eligible。再連按幾次「跑完 slice」，會發現 slice 短的 C 輪到的次數比較多，但每次只執行一小段。</p>
+        <p>換句話說，lag 決定 task 有沒有資格執行（公平），deadline 決定 eligible 的 task 之間誰先誰後（延遲）。問題是 v6.6 所有 task 的 slice 都固定為 0.75ms，CPU scheduler 無從得知誰比較急，要到 v6.12，task 才能透過 <code>sched_attr</code> 指定自己的 slice。此外，v6.6 會在 task 進入 sleep 時保存它的 lag，醒來時再還回去，因此剛執行完一段就去 sleep 的 task，醒來時多半不是 eligible，還得再等一下。</p>
+        <details class="deep">
+          <summary>深入：kernel 的 V 從哪裡來，和 GPS 差多少</summary>
+          <p>v6.6 <code>kernel/sched/fair.c</code> 的註解寫的就是第 3 章的定義：</p>
+          <div class="tex-block">\text{lag}_i = S - s_i = w_i \cdot (V - v_i)</div>
+          <p>這條式子可以從 lag 的定義推出來。<span class="tex">v_i</span> 是 task 的 vruntime，實際執行時間按權重換算成 nice 0 的單位，所以 <span class="tex">s_i = \frac{w_i}{1024}\, v_i</span>。GPS 這邊也定義一個虛擬時間 <span class="tex">V</span>，讓它以 <span class="tex">1024 / W</span> 的速度前進，那麼 <span class="tex">dS_i/dt = w_i / W = \frac{w_i}{1024} \cdot dV/dt</span>，也就是 <span class="tex">S_i = \frac{w_i}{1024}\, V</span>。兩式相減：</p>
+          <div class="tex-block">\text{lag}_i = S_i - s_i = \frac{w_i}{1024}\,(V - v_i)</div>
+          <p>kernel 的註解把權重當成單純的比重，沒有除以 1024，單位是「權重 × 時間」；除以 nice 0 的權重 1024 就換回時間，也就是本站圖上的單位。不管哪種單位，正負號都只看 <span class="tex">V - v_i</span>。</p>
+          <p>差別在 <span class="tex">V</span> 的算法。kernel 沒有真的跑一個 GPS，而是拿所有 vruntime 的加權平均（<code>avg_vruntime()</code>）當作 <span class="tex">V</span>。這個近似成立的理由是「lag 總和是 0」：把 <span class="tex">\sum_j w_j (V - v_j) = 0</span> 移項，解出來的 <span class="tex">V</span> 就是加權平均。但這只在 runqueue 上所有 task 的 lag 加起來剛好是 0 時才對。task 帶著不為 0 的 lag 加入或離開，總和就不再是 0，加權平均和真正的 <span class="tex">V</span> 就分開了。註解自己也寫了：只有 task 都在 lag = 0 時進出，這兩者才相等。模擬頁上的 lag 是另外照定義算的 GPS，不是 kernel 的 <code>vlag</code>，所以可以拿來檢查 kernel 的近似差多少。</p>
+        </details>
+        <p class="fine">簡化：三個 task 都是 nice 0，所以 V 就是 vruntime 的平均；調整 slice 時 deadline 會立刻重算，實際的 kernel 要等到下一次 request 才會更新。</p>
+      </article>
+
+      <article class="card explain chapter" data-ch="preempt" data-title="什麼時候換人：preemption" data-q="醒來的 task 可以插隊嗎？">
+        <p>前面談的都是「挑誰」，另一個同樣重要的問題是「什麼時候挑」。回到第 1 章的狀態圖，task 離開 CPU 有兩種方式：自己去睡，或是被換下。只在第一種情況才重新挑選的 CPU scheduler 稱為 non-preemptive，一個不睡覺的 CPU-bound task 拿到 CPU 後就不會交出來（Windows 3.x 和 Mac OS 9 以前的 cooperative multitasking 就是這樣，一個程式卡在迴圈裡，整台電腦跟著卡住）。允許把 CPU 從正在執行的 task 手上拿走的，稱為 preemptive。</p>
+        <p>Linux 的 CPU scheduler 是 preemptive 的，搶占發生在兩個時機：</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>時機</th><th>CFS v2.6.24</th><th>EEVDF v6.6</th></tr></thead>
+          <tbody>
+            <tr><td>tick：curr 是否用完該拿的</td><td><span class="tex">\delta_{\text{exec}} > \text{sched\_slice}</span></td><td><span class="tex">v_{\text{curr}} \ge d_{\text{curr}}</span></td></tr>
+            <tr><td>喚醒：醒來的 task 能否插隊</td><td><span class="tex">v_{\text{curr}} - v_{\text{wakee}} > \text{gran}</span></td><td><code>pick_eevdf()</code> 選中醒來的 task</td></tr>
+          </tbody>
+        </table>
+        <p><span class="tex">\delta_{\text{exec}}</span> 是 curr 這次上 CPU 後執行了多久，<span class="tex">v_{\text{wakee}}</span> 是醒來那個 task 的 vruntime。tick 這一列保證任何 task 都不能一直佔著 CPU；喚醒這一列決定醒來的 task 要不要等，模擬頁的兩個 sched_feat 開關控制的就是這一列。</p>
+
+        <h2>CFS 的 WAKEUP_PREEMPT</h2>
+        <p>CFS 喚醒時的條件（<code>check_preempt_wakeup()</code>）是</p>
+        <div class="tex-block">v_{\text{curr}} - v_{\text{wakee}} > \text{gran}, \qquad \text{gran} = 10\,\text{ms} \times \frac{1024}{w_{\text{curr}}}</div>
+        <p>也就是醒來的 task 的 vruntime 要比 curr 小超過 10ms（<code>sysctl_sched_wakeup_granularity</code>，依 curr 的權重換算）才能插隊。設門檻是為了不讓「只落後一點點」的 task 頻繁打斷 curr。喚醒補償把醒來的 task 放到 <code>min_vruntime</code> − 20ms，通常就超過這個門檻，所以 interactive task 醒來多半能立刻執行。</p>
+        <p><code>WAKEUP_PREEMPT</code> 關掉的就是這一條，但 CFS 並不會因此變成 non-preemptive：tick 的檢查還在，只是醒來的 task 必須等到 curr 用完 <code>sched_slice()</code>。在模擬頁的「延遲和公平」情境（audio 每 5ms 醒來一次，另有兩個編譯 task cc1、cc2）關掉它，2 秒內的結果是：</p>
+        <table class="mini eq-ex">
+          <thead><tr><th></th><th>開著</th><th>關掉</th></tr></thead>
+          <tbody>
+            <tr><td>audio 平均喚醒延遲</td><td>10 µs</td><td>1.96 ms</td></tr>
+            <tr><td>context switch 次數</td><td>786</td><td>568</td></tr>
+            <tr><td>audio 的 CPU 比例</td><td>6.06%</td><td>4.37%</td></tr>
+          </tbody>
+        </table>
+        <p>audio 每次都要等 cc 用完 slice，延遲從幾乎為 0 變成約 2ms；另一方面 cc 被打斷的次數變少，context switch 少了約 28%。audio 的週期被拉長，一秒內完成的週期變少，CPU 比例也跟著下降。</p>
+
+        <h2>EEVDF 的 RUN_TO_PARITY</h2>
+        <p>EEVDF 的喚醒搶占沒有固定門檻，而是直接問挑選規則：如果現在重新挑，<code>pick_eevdf()</code> 會不會選醒來的 task？會，就搶占。規則前後一致，但 curr 可能才跑一小段，就因為一個 deadline 更早的 task 醒來而被換下。<code>RUN_TO_PARITY</code> 的做法是：curr 被選中後，只要還 eligible，就讓它把這個 slice 跑完，期間不重新比 deadline。</p>
+        <p>在模擬頁關掉 <code>RUN_TO_PARITY</code>，結果幾乎不變（context switch 1881 → 1871，audio 的延遲完全一樣）。原因是 v6.6 每個 task 的 slice 都是 0.75ms：curr 是在 eligible 時被選中的，deadline 最多是 <span class="tex">V + 0.75</span>；醒來的 task 若 lag 不大，被放在 V 附近，deadline 也在 <span class="tex">V + 0.75</span> 附近，就算重新比，多半還是 curr 的 deadline 比較早。這層保護真正擋下的，是 slice 比 curr 短的 task，所以 v6.12 讓 task 自訂 slice 時，同時加了 <code>PREEMPT_SHORT</code>：slice 比 curr 短的 task 醒來，可以取消 curr 的這層保護。</p>
+        <details class="deep">
+          <summary>深入：用數字看 RUN_TO_PARITY 擋下了什麼</summary>
+          <p>三個 nice 0，單位 ms，假設這時 <span class="tex">V = 0</span>。B 在 <span class="tex">v = -0.3</span> 被選中，slice 0.75，deadline 是 0.45。跑了 0.2ms 之後，A 醒來，睡前帶著 +0.5 的 lag，被放在 <span class="tex">v = -0.5</span>，deadline 是 0.25。</p>
+          <table class="mini eq-ex">
+            <thead><tr><th></th><th><span class="tex">v_i</span></th><th>eligible</th><th><span class="tex">d_i</span></th><th>關掉 RUN_TO_PARITY</th><th>開著</th></tr></thead>
+            <tbody>
+              <tr><td>B（curr）</td><td>−0.1</td><td>是</td><td>0.45</td><td>被換下</td><td>繼續跑完剩下的 0.55ms</td></tr>
+              <tr><td>A（剛醒）</td><td>−0.5</td><td>是</td><td>0.25</td><td>立刻執行</td><td>等 B 跑完</td></tr>
+            </tbody>
+          </table>
+          <p>A 的 deadline 比 B 早，是因為它帶著正的 lag 醒來，被放在 V 的左邊很遠。slice 一樣長的情況下，這需要 A 睡前被欠了不少，模擬裡的 audio 很少符合這個條件。</p>
+        </details>
+        <p class="fine">另一個名稱相近的觀念是 kernel preemption（<code>CONFIG_PREEMPT</code>）：task 正在執行 kernel 程式碼（例如 system call）的途中，能不能被換下。本站只模擬 task 之間由 CPU scheduler 決定的搶占，不涉及這一層。</p>
+      </article>
+
+      <article class="card explain chapter" data-ch="tradeoff" data-title="延遲與吞吐量的取捨" data-q="切換得越勤，就越好嗎？">
+        <p>評估 CPU scheduler 的指標很多（CPU 使用率、throughput、turnaround time、waiting time、response time），它們無法同時做到最好，其中最常見的拉扯是 response time 和 throughput。本站量的「喚醒延遲」，也就是 task 醒來到真正開始執行的時間，屬於 response time。</p>
+        <p>拉扯的來源是 context switch 的成本。每次換人，kernel 要保存與載入暫存器、執行一次排程邏輯，這是直接成本；更大的往往是間接成本：新上來的 task 要用的資料不在 cache 裡，TLB 也要重新填，前一小段時間會跑得比較慢。以 Round Robin 為例，設 time slice 是 <span class="tex">q</span>，每次切換的成本是 <span class="tex">c</span>，<span class="tex">n</span> 個 task 輪流執行：</p>
+        <div class="tex-block">\text{用在工作上的比例} = \frac{q}{q + c}, \qquad \text{醒來後最久要等} \approx (n - 1)(q + c)</div>
+        <p><span class="tex">q</span> 越小，醒來的 task 越快輪到，但切換越頻繁，花在 <span class="tex">c</span> 上的比例越高；<span class="tex">q</span> 越大則相反。假設 <span class="tex">c = 5\,\mu\text{s}</span>、<span class="tex">n = 3</span>（<span class="tex">c</span> 只是為了看出量級的假設值，實際的間接成本依工作負載差很多）：</p>
+        <table class="mini eq-ex">
+          <thead><tr><th><span class="tex">q</span></th><th>用在工作上的比例</th><th>醒來後最久要等</th></tr></thead>
+          <tbody>
+            <tr><td>0.1 ms</td><td>95.2%</td><td>0.21 ms</td></tr>
+            <tr><td>0.75 ms（EEVDF 預設 slice）</td><td>99.3%</td><td>1.51 ms</td></tr>
+            <tr><td>6.7 ms（CFS 三個 task 時的 sched_slice）</td><td>99.93%</td><td>13.4 ms</td></tr>
+          </tbody>
+        </table>
+        <p>但不是每個 task 都需要同一個 <span class="tex">q</span>。理想的做法是：在意延遲的 task 醒來時馬上執行，CPU-bound 的 task 一次跑長一點，減少切換。各代 CPU scheduler 的差別，很大一部分就在於怎麼辨認哪些 task 在意延遲，或讓 task 自己說出來。模擬頁「延遲和公平」情境 2 秒內的結果：</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>CPU scheduler</th><th>audio 平均喚醒延遲</th><th>context switch 次數</th><th>audio 的 CPU 比例（公平的份 5.49%）</th></tr></thead>
+          <tbody>
+            <tr><td>CFS v2.6.24</td><td>10 µs</td><td>786</td><td>6.06%</td></tr>
+            <tr><td>CFS，關掉 <code>WAKEUP_PREEMPT</code></td><td>1.96 ms</td><td>568</td><td>4.37%</td></tr>
+            <tr><td>EEVDF v6.6</td><td>623 µs</td><td>1881</td><td>5.49%</td></tr>
+            <tr><td>EEVDF v6.12（audio 的 slice 0.3ms）</td><td>3 µs</td><td>2133</td><td>6.15%</td></tr>
+          </tbody>
+        </table>
+        <ul>
+          <li>CFS 的 cc 一次跑一整段 <code>sched_slice()</code>（約 6.7ms），切換最少；audio 靠喚醒補償插隊，延遲也很低。代價在最後一欄：audio 拿到 6.06%，比公平的份多。CFS 是用公平換到延遲和吞吐量兩邊兼顧。</li>
+          <li>EEVDF v6.6 的 slice 縮成 0.75ms，切換次數是 CFS 的兩倍多，audio 卻還要等 600 多 µs，因為大家的 slice 一樣，audio 的 deadline 不會比較早。所有 task 都付了切換的成本，卻沒有換到 audio 要的延遲；好處是 audio 剛好拿到公平的份。</li>
+          <li>v6.12 讓 audio 自己宣告 0.3ms 的 slice，延遲降到幾乎為 0，切換再多一些。audio 的比例高於公平的份，原因見下面〈sleep 時 lag 怎麼算〉。</li>
+        </ul>
+        <details class="deep">
+          <summary>深入：sleep 時 lag 怎麼算，為什麼 CFS 和 v6.12 的 audio 多拿</summary>
+          <p>第 3 章的 GPS 在 task sleep 時不分 CPU 給它，lag 停在睡前的值，醒來接著算；照這個算法，睡覺不會讓欠帳消失。v6.6 也是這樣做的，睡前把 lag 存進 <code>vlag</code>，醒來放回去。</p>
+          <p>CFS 和 v6.12 在這裡和 GPS 不一樣。CFS 讓剛醒的 task 從 <code>min_vruntime − sched_latency</code> 開始，等於每次醒來都送它一段時間。v6.12 的 <code>DELAY_DEQUEUE</code> 讓 lag 為負的 task 睡著後還留在 runqueue 上，慢慢把負的 lag 還掉，醒來時 lag 大約是 0。從「睡覺時 lag 不變」的角度看，這兩種都等於把欠帳免了，所以圖上它們的 audio、editor 會一路往下。如果改成「睡覺就把負的 lag 清掉」，v6.12 看起來會是公平的。論文對帶著 lag 離開的 task 有幾種處理方式，這部分之後會再對照原文。</p>
+        </details>
+        <p class="fine">模擬器不計 context switch 的成本，切換是瞬間完成的，所以 CPU 比例不會因為切換變多而下降。看模擬結果時，請把 context switch 次數當作吞吐量成本的指標；CPU 比例反映的是公平，不是吞吐量。</p>
+      </article>
+
+      <article class="card explain chapter appendix" data-ch="glossary" data-title="名詞速查" data-q="讀到不熟的名詞時回來查">
+        <p>正文裡加了虛線底線的名詞，滑鼠移上去也會顯示同樣的定義。</p>
+        <div id="glossary"></div>
+      </article>
+
+        </div>
+      </div>
+    </section>
 
     <section class="page" id="page-sim">
       <details class="card scenario" id="scenarioCard"></details>
+      <details class="card tryit" id="exercises"></details>
       <main id="panels"></main>
       <section id="results" class="card results"></section>
     </section>
 
     <section class="page" id="page-concepts" hidden>
       <article class="card explain">
-        <h2>怎麼看模擬頁的圖</h2>
-        <ul>
-          <li>時間軸每一列是一個程式。深色是它正在用 CPU，淺色是它醒著、想跑，但 CPU 被別人佔著。只有一顆 CPU，所以任何時刻最多一列是深色。</li>
-          <li>表格裡「CPU 比例」是 2 秒內實際拿到的時間比例，「GPS 比例」是同一組程式在理想公平的情況下該拿到的比例。「喚醒延遲」是醒來到真的開始跑之間等了多久。</li>
-          <li>滑鼠停在圖上會顯示那一刻每個程式的 lag。上方的拖拉條可以換時段，寬度開到 2 秒可以看長期趨勢。</li>
-        </ul>
         <h2>lag 是什麼，怎麼算</h2>
 
 
       <h3>理想的參考：GPS</h3>
       <p>
-        比例分享排程的理論起點是 GPS（Generalized Processor Sharing）。它假設 CPU 可以像水流一樣同時分給所有想跑的程式：
-        程式 <var>i</var> 的權重是 <var>w<sub>i</sub></var>（nice 0 是 1024，nice 每差 1 大約差 1.25 倍），
-        某一刻所有想跑的程式權重加起來是 <var>W</var>，那 <var>i</var> 這一刻拿到的速度就是 <var>w<sub>i</sub></var> / <var>W</var>。
-        三個 nice 0 的程式都想跑時，每個同時以 1/3 的速度前進。真的 CPU 做不到這件事，一次只能跑一個，所以 GPS 只拿來當尺。
+        比例分享排程的理論起點是 GPS（Generalized Processor Sharing）。它假設 CPU 可以像水流一樣同時分給所有想跑的程式。程式 <span class="tex">i</span> 的權重是 <span class="tex">w_i</span>（nice 0 是 1024，nice 每差 1 大約差 1.25 倍），時刻 <span class="tex">\tau</span> 所有想跑的程式權重加起來是 <span class="tex">W(\tau)</span>，那 <span class="tex">i</span> 這一刻拿到 CPU 的速度是
       </p>
+      <div class="tex-block">\frac{dS_i}{d\tau} = \begin{cases} \dfrac{w_i}{W(\tau)} & i \text{ 想跑} \\[6pt] 0 & i \text{ 在睡覺} \end{cases} \qquad W(\tau) = \sum_{j \text{ 想跑}} w_j</div>
+      <p>把速度從 0 積到 <span class="tex">t</span>，就是 GPS 到時刻 <span class="tex">t</span> 為止會給 <span class="tex">i</span> 的 CPU 時間 <span class="tex">S_i(t)</span>。三個 nice 0 的程式都想跑時，每個同時以 <span class="tex">\tfrac{1}{3}</span> 的速度前進，1ms 各拿 <span class="tex">\tfrac{1}{3}</span> ms。真的 CPU 做不到這件事，一次只能跑一個，所以 GPS 只拿來當尺。</p>
 
       <h3>定義</h3>
       <p>
-        從開始到某一刻，GPS 會給程式 <var>i</var> 的 CPU 時間記為 <var>S<sub>i</sub></var>，真實排程器實際給的記為 <var>s<sub>i</sub></var>。
-        lag<sub>i</sub> = <var>S<sub>i</sub></var> − <var>s<sub>i</sub></var>。正的表示排程器欠它，負的表示它拿超過了。圖上的單位是時間（µs、ms）。
+        真實排程器到時刻 <span class="tex">t</span> 實際給程式 <span class="tex">i</span> 的 CPU 時間記為 <span class="tex">s_i(t)</span>。lag 是應得減實得：
       </p>
+      <div class="tex-block">\text{lag}_i(t) = S_i(t) - s_i(t)</div>
+      <p>正的表示排程器欠它，負的表示它拿超過了。圖上的單位是時間（µs、ms）。</p>
 
       <h3>例子</h3>
       <p>
-        audio、cc1、cc2 三個都是 nice 0，同時醒著。排程器讓 cc1 連續跑 1ms。這 1ms 裡 GPS 會給每個人 1/3ms，
-        所以 1ms 後 cc1 的 lag 是 1/3 − 1 = −2/3ms，audio 和 cc2 各是 +1/3ms。三個加起來是 0。
+        audio、cc1、cc2 三個都是 nice 0，同時醒著。排程器讓 cc1 連續跑 1ms。這 1ms 裡 GPS 會給每個人 1/3ms，所以 1ms 後 cc1 的 lag 是 1/3 − 1 = −2/3ms，audio 和 cc2 各是 +1/3ms。三個加起來是 0。
       </p>
+      <p>
+        接著換 cc2 跑 1ms、再換 audio 跑 1ms。每過 1ms，跑的那個 lag 減 2/3，等的兩個各加 1/3。到 3ms 時三個人各跑了 1ms，剛好等於 GPS 給的，lag 全部回到 0。
+      </p>
+      <figure class="dg">
+        <svg viewBox="0 0 640 250" role="img" aria-label="三個程式輪流跑 1ms 時的 lag">
+          <text class="dg-n" x="100" y="27" text-anchor="end">audio</text>
+          <text class="dg-n" x="100" y="45" text-anchor="end">cc1</text>
+          <text class="dg-n" x="100" y="63" text-anchor="end">cc2</text>
+          <rect class="dg-bar s2" x="110" y="34" width="160" height="14"/>
+          <rect class="dg-bar s3" x="270" y="52" width="160" height="14"/>
+          <rect class="dg-bar s1" x="430" y="16" width="160" height="14"/>
+          <text class="dg-s" x="20" y="80">真實 CPU：一次一個</text>
+          <text class="dg-s" x="20" y="150">lag</text>
+          <text class="dg-s" x="104" y="94" text-anchor="end">+2/3</text>
+          <text class="dg-s" x="104" y="154" text-anchor="end">0</text>
+          <text class="dg-s" x="104" y="214" text-anchor="end">−2/3</text>
+          <line class="dg-axis" x1="110" x2="590" y1="150" y2="150"/>
+          <line class="dg-grid" x1="270" x2="270" y1="10" y2="220"/>
+          <line class="dg-grid" x1="430" x2="430" y1="10" y2="220"/>
+          <line class="dg-grid" x1="590" x2="590" y1="10" y2="220"/>
+          <polyline class="dg-lag s1" points="110,150 270,120 430,90 590,150"/>
+          <polyline class="dg-lag s2" points="110,150 270,210 430,180 590,150"/>
+          <polyline class="dg-lag s3" points="110,150 270,120 430,180 590,150"/>
+          <text class="dg-s" x="110" y="240" text-anchor="middle">0</text>
+          <text class="dg-s" x="270" y="240" text-anchor="middle">1ms</text>
+          <text class="dg-s" x="430" y="240" text-anchor="middle">2ms</text>
+          <text class="dg-s" x="590" y="240" text-anchor="middle">3ms</text>
+        </svg>
+        <figcaption>上：誰在 CPU 上。下：三條 lag 線，顏色同上。在跑的那條以 2/3 的斜率往下，等的兩條以 1/3 往上；任何時刻三條加起來都是 0。</figcaption>
+      </figure>
 
       <h3>為什麼圖是鋸齒</h3>
       <p>
-        把上面的例子換成速率：正在跑的程式每過 1ms，lag 下降 1 − <var>w<sub>i</sub></var>/<var>W</var>；在排隊的程式每過 1ms，lag 上升 <var>w<sub>i</sub></var>/<var>W</var>。
-        三個 nice 0 時就是跑的那個以 2/3 的斜率往下，等的兩個以 1/3 往上。換人跑，斜率就翻過來，所以每條線都是一段一段的折線。
-        鋸齒的高度取決於排程器一次讓一個程式連續跑多久：兩個 nice 0 的 hog 在 CFS v2.6.24 下一次跑約 10ms，lag 在 ±5.5ms 之間擺；
-        EEVDF 每 1ms 換一次，只擺 ±0.5ms。EEVDF 論文證明 lag 的上下界和 request 大小有關（−r<sub>max</sub> &lt; lag &lt; max(r<sub>max</sub>, q)），
-        模擬裡實際的 request 被 1ms 的 tick 放大成 1ms，量到的 lag 都在 ±1ms 內。
+        把定義對時間微分。GPS 給的速度是 <span class="tex">w_i / W</span>；真實排程器給的速度不是 1 就是 0，看程式在不在 CPU 上。所以想跑的程式，lag 的斜率只有兩種：
       </p>
+      <div class="tex-block">\frac{d\,\text{lag}_i}{dt} = \frac{w_i}{W} - \frac{ds_i}{dt} = \begin{cases} \dfrac{w_i}{W} - 1 & i \text{ 在 CPU 上} \\[6pt] \dfrac{w_i}{W} & i \text{ 在排隊} \end{cases}</div>
+      <p>三個 nice 0 時 <span class="tex">w_i / W = \tfrac{1}{3}</span>，跑的那個以 <span class="tex">-\tfrac{2}{3}</span> 的斜率往下，等的兩個以 <span class="tex">+\tfrac{1}{3}</span> 往上。換人跑，斜率就翻過來，所以每條線都是一段一段的折線。</p>
+      <p>鋸齒的高度取決於排程器一次讓一個程式連續跑多久。程式連續跑 <span class="tex">q</span>，lag 就下降 <span class="tex">q\,(1 - w_i/W)</span>：兩個 nice 0 的 hog 在 CFS v2.6.24 下 <code>sched_slice()</code> 是 10ms，但 <code>check_preempt_tick()</code> 的條件是「超過」，第 10 個 tick 剛好等於、不換人，實際跑到 11ms，所以 lag 擺到 <span class="tex">11 \times \tfrac{1}{2} = 5.5</span> ms；EEVDF 每 1ms 換一次，只擺 <span class="tex">1 \times \tfrac{1}{2} = 0.5</span> ms。EEVDF 論文證明 lag 的上下界和 request 大小有關：</p>
+      <div class="tex-block">-r_{\max} \;<\; \text{lag}_i \;<\; \max(r_{\max},\, q)</div>
+      <p><span class="tex">r_{\max}</span> 是最大的 request（一次要求的執行長度），<span class="tex">q</span> 是排程的時間單位。模擬裡實際的 request 被 1ms 的 tick 放大成 1ms，量到的 lag 都在 ±1ms 內。</p>
 
       <h3>加起來永遠是 0</h3>
       <p>
-        只要有程式想跑，真實排程器和 GPS 都不會讓 CPU 閒著，所以同一段時間兩邊發出去的 CPU 總量一樣多。
-        有人多拿，一定有人少拿。所以看圖時不能只看一條線：audio 往下多少，cc1 和 cc2 合起來就往上多少。
-        要分辨的是一時的鋸齒和長期的漂移。一條線如果一路往下、沒有回來，表示那個程式長期拿得比公平的份多。
+        只要有程式想跑，真實排程器和 GPS 都不會讓 CPU 閒著，所以同一段時間兩邊發出去的 CPU 總量一樣多。寫成式子，把所有想跑的程式加起來：
       </p>
+      <div class="tex-block">\sum_i \frac{dS_i}{dt} = \sum_i \frac{w_i}{W} = 1, \qquad \sum_i \frac{ds_i}{dt} = 1 \quad\Longrightarrow\quad \frac{d}{dt}\sum_i \text{lag}_i = 0</div>
+      <p>睡覺的程式兩邊都是 0，lag 不動，也不影響總和。一開始大家的 lag 都是 0，所以總和永遠是 0。有人多拿，一定有人少拿。看圖時不能只看一條線：audio 往下多少，cc1 和 cc2 合起來就往上多少。要分辨的是一時的鋸齒和長期的漂移。一條線如果一路往下、沒有回來，表示那個程式長期拿得比公平的份多。</p>
 
       <h3>和 kernel 的對應</h3>
       <p>
-        v6.6 <code>kernel/sched/fair.c</code> 的註解寫的就是這個定義：lag<sub>i</sub> = S − s<sub>i</sub> = w<sub>i</sub> · (V − v<sub>i</sub>)。
-        <var>v<sub>i</sub></var> 是程式的 vruntime（實際執行時間除以權重，以 nice 0 為單位），<var>V</var> 是 GPS 的虛擬時間。
-        EEVDF 只允許 lag ≥ 0（也就是 V ≥ v<sub>i</sub>）的程式被選，叫做 eligible，然後在這些程式裡挑 deadline 最早的。
-        差別在 V 的算法：kernel 沒有真的跑一個 GPS，而是拿所有 vruntime 的加權平均當作 V。註解自己也寫了，只有程式都在 lag = 0 時進出，這兩者才相等。
-        網頁上的 lag 是另外照定義算的 GPS，不是 kernel 的 <code>vlag</code>，所以可以拿來檢查 kernel 的近似差多少。
+        v6.6 <code>kernel/sched/fair.c</code> 的註解寫的就是這個定義：
       </p>
+      <div class="tex-block">\text{lag}_i = S - s_i = w_i \cdot (V - v_i)</div>
+      <p>這條式子可以從上面的定義推出來。<span class="tex">v_i</span> 是程式的 vruntime，實際執行時間按權重換算成 nice 0 的單位，所以 <span class="tex">s_i = \frac{w_i}{1024}\, v_i</span>。GPS 這邊也定義一個虛擬時間 <span class="tex">V</span>，讓它以 <span class="tex">1024 / W</span> 的速度前進，那麼 <span class="tex">dS_i/dt = w_i / W = \frac{w_i}{1024} \cdot dV/dt</span>，也就是 <span class="tex">S_i = \frac{w_i}{1024}\, V</span>。兩式相減：</p>
+      <div class="tex-block">\text{lag}_i = S_i - s_i = \frac{w_i}{1024}\,(V - v_i)</div>
+      <p>kernel 的註解把權重當成單純的比重，沒有除以 1024，單位是「權重 × 時間」；除以 nice 0 的權重 1024 就換回時間，也就是本站圖上的單位。不管哪種單位，正負號都只看 <span class="tex">V - v_i</span>：EEVDF 只允許 lag ≥ 0（也就是 <span class="tex">v_i \le V</span>）的程式被選，叫做 eligible，然後在這些程式裡挑 deadline 最早的。</p>
+      <p>差別在 <span class="tex">V</span> 的算法。kernel 沒有真的跑一個 GPS，而是拿所有 vruntime 的加權平均（<code>avg_vruntime()</code>）當作 <span class="tex">V</span>：</p>
+      <div class="tex-block">V \approx \frac{\sum_j w_j\, v_j}{\sum_j w_j}</div>
+      <p>這個近似成立的理由是上一節的「lag 總和是 0」：把 <span class="tex">\sum_j w_j (V - v_j) = 0</span> 移項，解出來的 <span class="tex">V</span> 就是加權平均。但這只在佇列上所有程式的 lag 加起來剛好是 0 時才對。程式帶著不為 0 的 lag 加入或離開，總和就不再是 0，加權平均和真正的 <span class="tex">V</span> 就分開了。註解自己也寫了：只有程式都在 lag = 0 時進出，這兩者才相等。網頁上的 lag 是另外照定義算的 GPS，不是 kernel 的 <code>vlag</code>，所以可以拿來檢查 kernel 的近似差多少。</p>
 
       <h3>睡覺的時候怎麼算</h3>
       <p>
-        程式睡覺時不想跑，GPS 不分 CPU 給它，<var>S<sub>i</sub></var> 和 <var>s<sub>i</sub></var> 都不動，所以 lag 停在睡前的值，醒來接著算。
-        這是一個選擇，不是唯一的算法。照這個算法，睡覺不會讓欠帳消失。v6.6 也是這樣做的，睡前把 lag 存進 <code>vlag</code>，醒來放回去。
+        程式睡覺時不想跑，GPS 不分 CPU 給它，<var>S<sub>i</sub></var> 和 <var>s<sub>i</sub></var> 都不動，所以 lag 停在睡前的值，醒來接著算。這是一個選擇，不是唯一的算法。照這個算法，睡覺不會讓欠帳消失。v6.6 也是這樣做的，睡前把 lag 存進 <code>vlag</code>，醒來放回去。
       </p>
       <p>
-        CFS 和 v6.12 在這裡和 GPS 不一樣。CFS 讓剛醒的程式從 <code>min_vruntime − sched_latency</code> 開始，等於每次醒來都送它一段時間。
-        v6.12 的 <code>DELAY_DEQUEUE</code> 讓 lag 為負的程式睡著後還留在佇列上，慢慢把負的 lag 還掉，醒來時 lag 大約是 0。
-        從「睡覺時 lag 不變」的角度看，這兩種都等於把欠帳免了，所以圖上它們的 audio、editor 會一路往下。
-        如果改成「睡覺就把負的 lag 清掉」，v6.12 看起來會是公平的。論文對帶著 lag 離開的程式有幾種處理方式，這部分之後會再對照原文。
+        CFS 和 v6.12 在這裡和 GPS 不一樣。CFS 讓剛醒的程式從 <code>min_vruntime − sched_latency</code> 開始，等於每次醒來都送它一段時間。v6.12 的 <code>DELAY_DEQUEUE</code> 讓 lag 為負的程式睡著後還留在佇列上，慢慢把負的 lag 還掉，醒來時 lag 大約是 0。從「睡覺時 lag 不變」的角度看，這兩種都等於把欠帳免了，所以圖上它們的 audio、editor 會一路往下。如果改成「睡覺就把負的 lag 清掉」，v6.12 看起來會是公平的。論文對帶著 lag 離開的程式有幾種處理方式，這部分之後會再對照原文。
       </p>
           </article>
     </section>
 
-    <section class="page" id="page-source" hidden>
-      <article class="card explain">
-        <h2>原始碼對照（製作中）</h2>
-        <p>這一頁會把模擬一步一步往前走，右邊同時顯示當年 kernel 對應的函式並標出執行到的行。
-          模擬器的函式名稱和 kernel 一致（<code>update_curr</code>、<code>place_entity</code>、<code>pick_eevdf</code>…），每一步都可以對到原始碼的行號。</p>
-        <p>預計先做 EEVDF 的 lag 相關函式：<code>avg_vruntime()</code>、<code>entity_eligible()</code>、<code>place_entity()</code>，
-          以及 CFS v2.6.24 的喚醒補償和 v6.5 之前 migration 時對 vruntime 的調整。</p>
-      </article>
-    </section>
+    <section class="page" id="page-source" hidden></section>
 
     <footer>
       <p>模擬的簡化：單核、沒有 cgroup、HZ=1000、沒有 HRTICK。讀原始碼時的細節在 <code>notes/</code>。</p>

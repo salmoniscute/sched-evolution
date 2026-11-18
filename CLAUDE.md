@@ -96,9 +96,49 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 網頁分三頁（hash 路由）：模擬（控制列固定在頂端，圖在前、結果比較圖在後）、概念（lag 與 GPS 的推導）、原始碼（製作中）。情境說明預設收起來，強調不同程式要的是延遲還是吞吐量／公平。
   - 下一步：原始碼頁（抽取腳本 + 步驟→行號 JSON），可加入 v6.5 的睡眠補償與 migration 程式碼做歷史對照。
 
+- 2026-11-16：原始碼頁第一批（`src/ui/source.ts`）：喚醒時的放置。CFS v2.6.24 與 EEVDF v6.6 逐步對照（模擬器 trace 驅動，程式碼行內顯示實際數值），v6.5 的補償與 migration 正規化只做靜態對照。抽取腳本 `scripts/extract-snippets.ts` + `src/source/manifest.ts` → `src/source/snippets.json`，測試檢查 JSON 和 `kernel-src/` 一致。新增 `kernel-src/v6.5/`。筆記見 `notes/06-source-wakeup-placement.md`。
+  - 發現：CFS 下 editor 第一次長睡後就一直貼著 −20ms 的補償上限，短睡醒來也一樣。
+  - Elixir 的 2.4 版本名稱沒有 v（`2.4.0`）。
+
+- 2026-11-16：模擬頁加上決策檢視、sched_feat 開關、lag 圖共用刻度。
+  - 引擎新增 `SchedEvent`（`SimObserver.onEvent`）：每次 `schedule()` 的挑選，以及「醒來但沒觸發重新排程」的喚醒，各附一份 `class->snapshot()`。`RunRecorder.events` 收集，`src/ui/inspect.ts` 轉成說明文字、數線、數值表。點時間軸看那一刻的決策，◀ ▶ 逐個決策前進。
+  - 開關定義在 `src/variants.ts`（不碰 DOM，可測試）：CFS 的 `NEW_FAIR_SLEEPERS` / `WAKEUP_PREEMPT` / `START_DEBIT`，EEVDF 的 `RUN_TO_PARITY` / `PLACE_LAG`，v6.12 另有 `custom_slice` / `PREEMPT_SHORT` / `DELAY_DEQUEUE`。改過開關時表格會附上預設值的數字。
+  - 修正：`schedule()` 改成在 `pick_next_task()` 之後才清 `need_resched`（和 v6.6 `__schedule()` 一致）。原本先清，EEVDF 在 dequeue 途中 `update_deadline()` 再設一次，會在同一時刻多跑一次 `schedule()`。影響：v6.12 情境 4 的 context switch 2134 → 2133。
+  - 發現：情境 4 裡 `RUN_TO_PARITY` 關掉幾乎沒差（2026-11-17 更正：原因不只是負 lag。關掉後 audio 搶不到的理由大多變成「cc 的 deadline 比較早」，v6.6 的 slice 一樣長，audio 的 deadline 很少比較早）；CFS 關掉 `NEW_FAIR_SLEEPERS` 後 audio 平均等 8.3ms、只拿到 2.29%。
+  - 測試 `test/events.test.ts`：事件和時間軸一致、挑選符合快照（CFS 最左邊；EEVDF eligible 中 deadline 最早）、說明不退回中性敘述。
+  - 待辦：情境 2（editor）的週期剛好 10ms，喚醒會對齊 tick，違反「不對齊 tick」的原則；`scenarios.ts` 的結論數字仍是寫死的。
+
+- 2026-11-17：讓網頁更適合學習。
+  - 新增「從這裡開始」頁（`#/start`，預設首頁）：程式的三種狀態與排程的三種時機（附圖）、延遲 vs. 公平、nice 與權重、CFS 的 vruntime 與喚醒補償、EEVDF 的 eligible / deadline（附數線例子）、演進主線、建議閱讀順序、名詞速查。
+  - `src/ui/glossary.ts`：名詞表。決策說明裡的術語自動加虛線底線（`linkTerms`，每段第一次出現），表頭手動標（`term`），滑鼠移上去或點一下顯示定義（浮動提示框掛在 body，不會被表格捲軸裁掉）。
+  - 決策檢視先給一句不用術語的白話摘要（`Explained.plain`），細節收進「排程器實際比了什麼」，展開狀態三欄同步。數線圖例改成完整說明怎麼讀。進到模擬頁會先選好第一次喚醒的決策。
+  - 每個情境加「動手試」（`Scenario.exercises`）：先猜，按鈕套用開關，答案的數字現場跑模擬算，文字只寫原因。測試檢查題目的開關存在、說「完全不變」的題目真的完全不變、其他題目真的有變。
+  - 概念頁加「三個程式輪流跑 1ms」的 lag 圖；原本的「怎麼看模擬頁的圖」搬到模擬頁頂端的可收合卡片。結果圖在 p99 比平均小時加註原因。
+
+- 2026-11-17：減少文字量、改成邊做邊學。
+  - 首頁改成「讀一段、動一下」：`src/ui/start.ts` 的四個小圖（拖 nice 看權重比例；CFS 的 vruntime 數線，可以讓 A 去睡再叫醒看喚醒補償；EEVDF 拖 slice 看誰被選、按鈕讓被選中的跑完 slice；演進時間軸）。小圖是玩具模型，不經過模擬核心，簡化之處寫在圖下方。名詞速查收進可展開區塊。
+  - 模擬頁：拿掉「怎麼看這一頁」卡片，改成 `src/ui/tour.ts` 的逐步導覽（第一次進來自動開始，localStorage 記住；控制列的「導覽」可重看）。決策檢視的細節預設收起；sched_feat 的說明改成滑鼠提示，只有關掉的開關才在下方寫出效果；「怎麼解讀」收起來，提示先做動手試。
+  - 導覽列加高（64px，品牌標誌 + 副標、分頁底線），模擬頁的控制項移到第二列；高度寫進 `--topbar-h`，原始碼頁的步驟列貼在它下面。首頁和概念頁的卡片收窄到 880px。HTML 和 `source.ts` 裡中文斷行不要換行縮排，否則瀏覽器會多出空白。
+  - 網頁改為五頁：介紹（`#/intro`，預設首頁：為什麼要了解 scheduler、各代為什麼一再改寫＋演進時間軸、各頁導覽卡片）、基礎觀念（`#/basics`，原「從這裡開始」，舊網址 `#/start` 導到介紹頁）、模擬、概念、原始碼。介紹頁與基礎觀念頁的文字改用 sysprog 講義的口吻（問題帶出主題、kernel 名詞保留英文、用 task 稱呼）；其餘頁面還沒改。
+  - 介紹頁的學習理由：CPU scheduler 是作業系統觀念的集大成、雲端資源分配（KVM vCPU 兩層排程與 steal time、Kubernetes CPU request → `cpu.weight`、limit → CFS bandwidth control）、效能分析（schedstat、perf sched、p99）、理論與工程的落差。用詞一律寫 CPU scheduler，不單寫 scheduler。延伸閱讀列 sysprog 講義系列（hackmd.io/@sysprog/linux-scheduler-0 起）、Stoica 1995 論文、LWN 925371。
+  - 讀過 sysprog 講義系列：第 1 章（O(1)）沒有 `sleep_avg` / `effective_prio` / `goodness()` 的細節，之後做 O(1)、O(n) 仍要直接讀 2.6.0 / 2.4 原始碼；第 3 章分析的是 v5.16（有 GENTLE_FAIR_SLEEPERS），不是 v2.6.24；第 5 章（EEVDF）和本專案的 v6.6 / v6.12 實作一致，另有論文兩個 client 的逐步例子（w=2,2；r=2,1），可做成概念頁的互動圖。
+
 ## 指令
 
 - `npm run dev`：開網頁（Vite，http://localhost:5173）
 - `npm test`：跑模擬核心測試（vitest）
 - `npm run typecheck`
 - `npm run fetch-kernel-src`：重抓 `kernel-src/`
+- `npm run extract-snippets`：依 `src/source/manifest.ts` 重新產生 `src/source/snippets.json`
+
+- 2026-11-17：解說改成「一句直覺 → 公式（KaTeX，`src/ui/math.ts`）→ 符號說明 → 代入數字」。
+  - 行內程式碼依種類上色，沒包 `<code>` 的 kernel 名稱自動包起來（`src/ui/code-chips.ts`）。
+  - 基礎觀念頁新增：GPS 與 lag 一節、vruntime 相等 ⇒ 時間比等於權重比的推導、starvation（含 aging 與 O(1) 的 `EXPIRED_STARVING()`，已對照 v2.6.12）、preemptive 與 non-preemptive（`WAKEUP_PREEMPT`、`RUN_TO_PARITY`）、延遲與吞吐量的取捨。情境 4 加一題 `WAKEUP_PREEMPT` 的動手試。
+  - 發現：情境 4 關掉 `WAKEUP_PREEMPT`，audio 平均喚醒延遲 10µs → 1.96ms，context switch 786 → 568。`RUN_TO_PARITY` 只在醒來的 task deadline 比 curr 早時才有作用，slice 相同時很少發生。
+  - 待辦：基礎觀念頁的模擬數字是寫死的，改了工作負載要重跑確認；模擬器不計 context switch 成本。
+
+- 2026-11-17：整理網頁結構，減少一頁到底的長文。
+  - 導覽列改成四頁：介紹、學習路線（`#/learn/<章>`）、模擬、原始碼。原「基礎觀念」和「概念：lag 與 GPS」合併成學習路線的 8 章（problem、weight、lag、cfs、why、eevdf、preempt、tradeoff）＋附錄名詞速查（`#/learn/glossary`，`article.appendix`，不編號、不在上下章串列裡），一次只顯示一章，左側章節目錄（手機上是橫向圓點列），底下上一章／下一章。章節標題與引導問題寫在 `index.html` 的 `data-title` / `data-q`，目錄與章首由 `src/ui/learn.ts` 產生。舊網址 `#/basics`、`#/concepts`、`#/start` 會導到新位置。
+  - 兩頁重複的 GPS／lag 內容合併到第 3 章；推導、歷史、細節數字收進 `details.deep`（「深入：…」），主線只留直覺、公式、小圖和動手試。
+  - 介紹頁「為什麼要了解 CPU scheduler」的四大段改成四張卡片，點一張才顯示那一段；延伸閱讀收起來。
+  - 新增第 5 章「為什麼離開 CFS」：只有權重一個參數、延遲靠 heuristics（v6.5 → v6.6 移除 `GENTLE_FAIR_SLEEPERS`、`START_DEBIT`、`LAST_BUDDY`、`sysctl_sched_latency` / `min_granularity` / `wakeup_granularity`，已對照 `kernel-src/`）、latency-nice 與 dual tree、`PLACE_BONUS` 的 67/33 vs 50/50、各方 benchmark、介面從 latency-nice 改成 slice。引文出自 LKML（Zijlstra 的 v1–v3 cover letter、Hegde 的測試回覆）與 commit 147f3efaa241、5e963f2bd465，出處列在章末。git.kernel.org 對自動抓取回 403，commit 用 GitHub 鏡像讀；「Remove START_DEBIT」commit 的內文沒讀到。

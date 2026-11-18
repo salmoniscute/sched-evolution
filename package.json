@@ -9,11 +9,16 @@
     "build": "vite build",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "fetch-kernel-src": "scripts/fetch-kernel-src.sh"
+    "fetch-kernel-src": "scripts/fetch-kernel-src.sh",
+    "extract-snippets": "node --experimental-transform-types --no-warnings scripts/extract-snippets.ts"
   },
   "devDependencies": {
+    "@types/node": "^24.19.2",
     "typescript": "^7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"
+  },
+  "dependencies": {
+    "katex": "^0.19.1"
   }
 }

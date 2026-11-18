@@ -1,5 +1,5 @@
 // 記錄「誰在 CPU 上」的時間段，給時間軸畫圖用。
-import type { SimObserver } from '../core/engine.ts';
+import type { SchedEvent, SimObserver } from '../core/engine.ts';
 import type { Ns, Task } from '../core/types.ts';
 
 export interface RunSegment {
@@ -19,7 +19,13 @@ export interface RunnableSegment {
 export class RunRecorder implements SimObserver {
   readonly segments: RunSegment[] = [];
   readonly runnable: RunnableSegment[] = [];
+  /** 排程決策，依時間排序 */
+  readonly events: SchedEvent[] = [];
   private readonly open = new Map<number, RunnableSegment>();
+
+  onEvent(e: SchedEvent): void {
+    this.events.push(e);
+  }
 
   onAdvance(t0: Ns, t1: Ns, curr: Task<unknown> | null, runnable: readonly Task<unknown>[]): void {
     const pid = curr?.pid ?? null;

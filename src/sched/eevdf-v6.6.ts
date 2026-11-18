@@ -83,6 +83,8 @@ export interface EntityView {
   vruntime: Ns;
   deadline: Ns;
   vlag: Ns;
+  /** request size r_i（實際時間） */
+  slice: Ns;
   /** 目前是否 eligible（lag ≥ 0） */
   eligible: boolean;
   /** v6.12 DELAY_DEQUEUE：睡著但還在樹上 */
@@ -257,10 +259,11 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
 
   /** update_entity_lag()（:710）：vlag = V − v_i，限制在 ±max(2·slice, TICK) 換成虛擬時間 */
   protected update_entity_lag(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
-    const lag = this.avg_vruntime(cfs_rq) - se.vruntime;
+    const V = this.avg_vruntime(cfs_rq);
+    const lag = V - se.vruntime;
     const limit = calc_delta_fair(Math.max(2 * se.slice, rq.tick_nsec), se);
     se.vlag = clamp(lag, -limit, limit);
-    rq.trace.log(rq.clock, 'update_entity_lag', se.task.pid, { lag, limit, vlag: se.vlag });
+    rq.trace.log(rq.clock, 'update_entity_lag', se.task.pid, { V, vruntime: se.vruntime, lag, limit, vlag: se.vlag });
   }
 
   /**
@@ -433,6 +436,8 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
   protected place_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity, flags: number): void {
     const vruntime = this.avg_vruntime(cfs_rq);
     let lag = 0;
+    // 只給 trace 用：放大前的 W
+    let W: number | null = null;
 
     se.slice = this.base_slice(se);
     let vslice = calc_delta_fair(se.slice, se);
@@ -443,6 +448,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
 
       let load = cfs_rq.avg_load;
       if (curr && curr.on_rq) load += curr.load.weight;
+      W = load;
 
       lag *= load + se.load.weight;
       if (!load) load = 1; // WARN_ON_ONCE
@@ -461,6 +467,9 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
       V: vruntime,
       vlag: se.vlag,
       lag,
+      W,
+      weight: se.load.weight,
+      vslice: se.deadline - se.vruntime,
       vruntime: se.vruntime,
       deadline: se.deadline,
     });
@@ -628,6 +637,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
       vruntime: se.vruntime,
       deadline: se.deadline,
       vlag: se.vlag,
+      slice: se.slice,
       eligible: this.entity_eligible(c, se),
       sched_delayed: se.sched_delayed,
       sum_exec_runtime: se.sum_exec_runtime,
