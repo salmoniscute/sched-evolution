@@ -4,6 +4,8 @@ import { NSEC_PER_SEC, type SchedClass, type TaskSpec } from '../src/core/types.
 import { CfsV2_6_24 } from '../src/sched/cfs-v2.6.24.ts';
 import { EevdfV6_6 } from '../src/sched/eevdf-v6.6.ts';
 import { EevdfV6_12 } from '../src/sched/eevdf-v6.12.ts';
+import { O1V2_6_0 } from '../src/sched/o1-v2.6.0.ts';
+import { OnV2_4_0 } from '../src/sched/on-v2.4.0.ts';
 
 export const hog = (name: string, nice = 0, arrival = 0): TaskSpec => ({
   name,
@@ -28,4 +30,10 @@ export const schedulers: [string, () => SchedClass<any>][] = [
   ['cfs-v2.6.24', () => new CfsV2_6_24()],
   ['eevdf-v6.6', () => new EevdfV6_6()],
   ['eevdf-v6.12-slice', () => new EevdfV6_12()],
+];
+
+/** O(n)、O(1)：沒有比例分享與 vruntime，只跑和這些無關的共通測試。第三欄是 HZ */
+export const legacySchedulers: [string, () => SchedClass<any>, number][] = [
+  ['on-v2.4.0', () => new OnV2_4_0(), 100],
+  ['o1-v2.6.0', () => new O1V2_6_0(), 1000],
 ];

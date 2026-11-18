@@ -39,8 +39,9 @@
             </select>
           </label>
           <label class="grow">起點 <input id="start" type="range" min="0" max="1950" step="1" value="100" /> <output id="startOut"></output></label>
-          <label title="三個排程器的 lag 圖用同一個縱軸，振幅可以直接比；取消後各自放大"><input id="sharedLag" type="checkbox" checked /> lag 圖共用刻度</label>
+          <label title="每個排程器的 lag 圖用同一個縱軸，振幅可以直接比；取消後各自放大"><input id="sharedLag" type="checkbox" checked /> lag 圖共用刻度</label>
           <button type="button" id="tourBtn" class="tour-btn">導覽</button>
+          <div class="pick" id="schedPick" role="group" aria-label="要比較的排程器"></div>
         </div>
       </div>
     </header>
@@ -74,7 +75,7 @@
         <h2>怎麼使用這個網站</h2>
         <div class="tour-cards three">
           <a class="tcard" href="#/learn/problem"><span class="tnum">1</span><b>學習路線</b><span>八個短章，每章一個問題、一條公式、一張可以操作的小圖。從權重一路走到 EEVDF 與延遲的取捨。</span></a>
-          <a class="tcard" href="#/sim"><span class="tnum">2</span><b>模擬</b><span>三個 CPU scheduler 並排執行同一組工作負載。點時間軸看每個決策的理由，關掉 sched_feat 看差在哪裡。</span></a>
+          <a class="tcard" href="#/sim"><span class="tnum">2</span><b>模擬</b><span>從 2.4 的 O(n) 到 6.12 的 EEVDF，挑幾個 CPU scheduler 並排執行同一組工作負載。點時間軸看每個決策的理由，關掉開關看差在哪裡。</span></a>
           <a class="tcard" href="#/source"><span class="tnum">3</span><b>原始碼</b><span>task 被喚醒時放在哪裡，逐步對照 CFS 與 EEVDF 當年的 kernel 程式碼。</span></a>
         </div>
         <p class="next"><a href="#/learn/problem">從第 1 章開始<span class="arrow" aria-hidden="true">→</span></a></p>
@@ -552,7 +553,7 @@
     <section class="page" id="page-source" hidden></section>
 
     <footer>
-      <p>模擬的簡化：單核、沒有 cgroup、HZ=1000、沒有 HRTICK。</p>
+      <p>模擬的簡化：單核、沒有 cgroup、沒有 HRTICK。HZ 照各版本 i386 的預設：2.4 是 100，2.6 以後是 1000。</p>
     </footer>
     <script type="module" src="/src/ui/main.ts"></script>
   </body>

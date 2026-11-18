@@ -5,6 +5,8 @@ import { summarize } from '../src/core/metrics.ts';
 import { NSEC_PER_SEC, NSEC_PER_USEC as US } from '../src/core/types.ts';
 import { RunRecorder } from '../src/ref/recorder.ts';
 import { scenarios } from '../src/scenarios.ts';
+import type { O1Snapshot } from '../src/sched/o1-v2.6.0.ts';
+import type { OnSnapshot } from '../src/sched/on-v2.4.0.ts';
 import { explain, latestAtOrBefore, latestForPid, rowsOf, type InspectCtx } from '../src/ui/inspect.ts';
 import { changedFlags, defaultFlags, variants, type Flags, type SchedVariant } from '../src/variants.ts';
 
@@ -13,7 +15,7 @@ const DURATION = 2 * NSEC_PER_SEC;
 function runWith(v: SchedVariant, flags: Flags, scenarioId: string) {
   const sc = scenarios.find((s) => s.id === scenarioId)!;
   const rec = new RunRecorder();
-  const result = new Simulator(v.make(flags), v.tasks(sc.tasks, flags), { duration: DURATION, observers: [rec] }).run();
+  const result = new Simulator(v.make(flags), v.tasks(sc.tasks, flags), { duration: DURATION, hz: v.hz, observers: [rec] }).run();
   const ctx: InspectCtx = { family: v.family, names: sc.tasks.map((t) => t.name), color: () => '', flags, events: rec.events };
   return { rec, ctx, summary: summarize(result), result };
 }
@@ -44,10 +46,26 @@ describe.each(scenarios.map((s) => s.id))('情境 %s', (id) => {
     for (const e of rec.events) if (e.kind === 'wakeup') expect(e.prev).toBe(e.next);
   });
 
-  test.each(cases)('%s：挑選符合快照（CFS 最左邊；EEVDF eligible 中 deadline 最早）', (_name, v, flags) => {
+  test.each(cases)('%s：挑選符合快照（O(n) goodness 最大；O(1) active 裡 prio 最好；CFS 最左邊；EEVDF eligible 中 deadline 最早）', (_name, v, flags) => {
     const { rec } = runWith(v, flags, id);
     for (const e of rec.events) {
       if (e.kind !== 'pick' || e.next === null) continue;
+      if (v.family === 'on') {
+        const s = e.snapshot as OnSnapshot;
+        const chosen = s.tasks.find((x) => x.pid === e.next)!;
+        expect(chosen.curr).toBe(true);
+        expect(chosen.goodness).toBeGreaterThan(0);
+        expect(Math.max(...s.tasks.map((x) => x.goodness))).toBe(chosen.goodness);
+        continue;
+      }
+      if (v.family === 'o1') {
+        const s = e.snapshot as O1Snapshot;
+        const chosen = s.tasks.find((x) => x.pid === e.next)!;
+        expect(chosen.curr).toBe(true);
+        expect(chosen.array).toBe('active');
+        expect(Math.min(...s.tasks.filter((x) => x.array === 'active').map((x) => x.prio))).toBe(chosen.prio);
+        continue;
+      }
       const rows = rowsOf(e.snapshot);
       const chosen = rows.find((r) => r.pid === e.next)!;
       expect(chosen.curr).toBe(true);
@@ -83,7 +101,8 @@ test('開關確實改變結果（比較情境 4）', () => {
     const flags = { ...defaultFlags(v), ...Object.fromEntries(off.map((k) => [k, false])) };
     return runWith(v, flags, 'latency').summary.tasks[0]!.wakeupLatencyAvg;
   };
-  const [cfs, , v612] = variants as [SchedVariant, SchedVariant, SchedVariant];
+  const cfs = variants.find((v) => v.id === 'cfs-v2.6.24')!;
+  const v612 = variants.find((v) => v.id === 'eevdf-v6.12-slice')!;
   // CFS 的低延遲靠喚醒補償
   expect(lat(cfs, [])).toBeLessThan(50 * US);
   expect(lat(cfs, ['NEW_FAIR_SLEEPERS'])).toBeGreaterThan(5000 * US);
@@ -93,7 +112,7 @@ test('開關確實改變結果（比較情境 4）', () => {
 });
 
 test('latestForPid：點在等待中的程式，回到它開始排隊的事件', () => {
-  const v = variants[1]!; // EEVDF v6.6：audio 醒來常常搶不到
+  const v = variants.find((d) => d.id === 'eevdf-v6.6')!; // audio 醒來常常搶不到
   const { rec } = runWith(v, defaultFlags(v), 'latency');
   const wake = rec.events.find((e) => e.kind === 'wakeup' && e.causePid === 1 && e.t > 100e6)!;
   const idx = latestForPid(rec.events, wake.t + 100 * US, 1);

@@ -55,7 +55,7 @@ export function mountLearn(): void {
       (prev ? `<a class="ch-prev" href="${href(prev.id)}"><span>← 上一章</span><b>${prev.title}</b></a>` : '<span></span>') +
       (next
         ? `<a class="ch-next" href="${href(next.id)}"><span>下一章 →</span><b>${next.title}</b></a>`
-        : `<a class="ch-next" href="#/sim"><span>讀完了 →</span><b>到模擬頁看三個 CPU scheduler 並排執行</b></a>`);
+        : `<a class="ch-next" href="#/sim"><span>讀完了 →</span><b>到模擬頁把各代 CPU scheduler 並排比較</b></a>`);
     c.el.append(foot);
   });
 

@@ -7,9 +7,10 @@ import type { CfsSnapshot } from '../sched/cfs-v2.6.24.ts';
 import type { EevdfSnapshot } from '../sched/eevdf-v6.6.ts';
 import type { Flags } from '../variants.ts';
 import { linkTerms, term } from './glossary.ts';
+import { explainLegacy, legacyDetail } from './inspect-legacy.ts';
 
 export interface InspectCtx {
-  family: 'cfs' | 'eevdf';
+  family: 'on' | 'o1' | 'cfs' | 'eevdf';
   names: string[];
   /** 第 i 個 task 的 CSS 顏色 */
   color: (i: number) => string;
@@ -130,7 +131,11 @@ export interface Explained {
 
 const WAKEUP_GRAN = 10 * MS; // v2.6.24 sysctl_sched_wakeup_granularity
 
+/** O(n) 與 O(1) 沒有 vruntime，說明和圖在 inspect-legacy.ts */
+export const isLegacy = (ctx: InspectCtx) => ctx.family === 'on' || ctx.family === 'o1';
+
 export function explain(ctx: InspectCtx, idx: number): Explained {
+  if (isLegacy(ctx)) return explainLegacy(ctx, idx);
   const e = ctx.events[idx]!;
   const rows = rowsOf(e.snapshot);
   const nm = (pid: number | null) => (pid === null ? 'idle' : (ctx.names[pid - 1] ?? `pid ${pid}`));
@@ -425,9 +430,9 @@ export function renderDecision(ctx: InspectCtx, idx: number, detailOpen = true):
   const seen = new Set<string>();
   return {
     title: `t = ${ms(e.t)}　${x.title}`,
-    html: `<p class="insp-plain">${esc(x.plain)}</p>
+    html: `<p class="insp-plain">${linkTerms(esc(x.plain))}</p>
       <details class="insp-detail"${detailOpen ? ' open' : ''}><summary>排程器實際比了什麼</summary>
-        <div class="insp-why">${x.why.map((s) => `<p>${linkTerms(esc(s), seen)}</p>`).join('')}</div>${numberLine(ctx, x)}${table(ctx, x, e)}
+        <div class="insp-why">${x.why.map((s) => `<p>${linkTerms(esc(s), seen)}</p>`).join('')}</div>${isLegacy(ctx) ? legacyDetail(ctx, idx, x) : numberLine(ctx, x) + table(ctx, x, e)}
       </details>`,
   };
 }

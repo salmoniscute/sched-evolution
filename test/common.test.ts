@@ -2,7 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { theoreticalShares } from '../src/core/metrics.ts';
 import { NSEC_PER_MSEC as MS, NSEC_PER_SEC as SEC } from '../src/core/types.ts';
-import { hog, run, schedulers } from './helpers.ts';
+import { hog, legacySchedulers, run, schedulers } from './helpers.ts';
 
 describe.each(schedulers)('%s', (_id, make) => {
   describe('比較情境 5：不同 nice 的 CPU 分配比例', () => {
@@ -56,5 +56,38 @@ describe.each(schedulers)('%s', (_id, make) => {
       expect(summary.nr_switches).toBe(1); // 從 idle 切入那一次
       expect(summary.tasks[0]!.share).toBe(1);
     });
+  });
+});
+
+describe.each(legacySchedulers)('%s', (_id, make, hz) => {
+  it('所有 task 的 runtime + idle = 總時間', () => {
+    const { result } = run(
+      make(),
+      [
+        { name: 'a', nice: 0, pattern: [{ run: 2 * MS, sleep: 7 * MS }] },
+        { name: 'b', nice: 5, arrival: 30 * MS, pattern: [{ run: 5 * MS, sleep: 3 * MS }] },
+      ],
+      { duration: SEC, hz },
+    );
+    const used = result.tasks.reduce((s, t) => s + t.runtime, 0);
+    expect(used + result.idleTime).toBe(result.duration);
+  });
+
+  it('同樣輸入結果相同（可重現）', () => {
+    const specs = [hog('a', 0), hog('b', 3), { name: 'c', nice: -2, pattern: [{ run: MS, sleep: 4 * MS }] }];
+    expect(run(make(), specs, { duration: SEC, hz }).summary).toEqual(run(make(), specs, { duration: SEC, hz }).summary);
+  });
+
+  it('只有一個 task 時不會切換，也不會 idle', () => {
+    const { summary } = run(make(), [hog('only')], { duration: SEC, hz });
+    expect(summary.nr_switches).toBe(1);
+    expect(summary.tasks[0]!.share).toBe(1);
+  });
+
+  it('nice 越小拿得越多', () => {
+    const { summary } = run(make(), [hog('a', -10), hog('b', 0), hog('c', 10)], { hz });
+    const [a, b, c] = summary.tasks.map((t) => t.share) as [number, number, number];
+    expect(a).toBeGreaterThan(b);
+    expect(b).toBeGreaterThan(c);
   });
 });

@@ -38,4 +38,26 @@ for entry in "${FILES[@]}"; do
   curl -fsSL --retry 3 "$url" -o "$out"
 done
 
+# 2.4 / 2.6.0 比 git 歷史（v2.6.12）還早：從 kernel.org 的 tarball 只解出需要的檔案
+# 版本  tarball 目錄  tarball 裡的頂層目錄  檔案...
+TARBALLS=(
+  "v2.4.0 v2.4 linux kernel/sched.c kernel/fork.c kernel/timer.c include/linux/sched.h"
+  "v2.6.0 v2.6 linux-2.6.0 kernel/sched.c kernel/fork.c kernel/timer.c include/linux/sched.h"
+)
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+for entry in "${TARBALLS[@]}"; do
+  read -r tag dir top files <<<"$entry"
+  ver="${tag#v}"
+  url="https://cdn.kernel.org/pub/linux/kernel/$dir/linux-$ver.tar.gz"
+  echo "fetch $url"
+  members=()
+  for f in $files; do members+=("$top/$f"); done
+  curl -fsSL --retry 3 "$url" | tar xzf - -C "$TMP" "${members[@]}"
+  for f in $files; do
+    mkdir -p "$DEST/$tag/$(dirname "$f")"
+    cp "$TMP/$top/$f" "$DEST/$tag/$f"
+  done
+done
+
 echo "done -> $DEST"

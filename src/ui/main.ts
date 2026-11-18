@@ -5,10 +5,10 @@ import { NSEC_PER_MSEC as MS, NSEC_PER_SEC as SEC, NSEC_PER_USEC as US } from '.
 import { GpsShadow, simulateGps, type ShadowSample, type ShadowTaskState } from '../ref/gps.ts';
 import { RunRecorder } from '../ref/recorder.ts';
 import { scenarios, type Scenario } from '../scenarios.ts';
-import { changedFlags, defaultFlags, variants, type Flags, type SchedVariant } from '../variants.ts';
+import { changedFlags, DEFAULT_COMPARE, defaultFlags, variants, type Flags, type SchedVariant } from '../variants.ts';
 import { installCodeChips } from './code-chips.ts';
 import { renderMathIn } from './math.ts';
-import { glossaryHtml, installTooltips, term } from './glossary.ts';
+import { glossaryHtml, installTooltips, linkTermsIn, term } from './glossary.ts';
 import { latestAtOrBefore, latestForPid, renderDecision, type InspectCtx } from './inspect.ts';
 import { mountLearn, showChapter } from './learn.ts';
 import { mountSourcePage } from './source.ts';
@@ -38,18 +38,84 @@ interface RunData {
   names: string[];
 }
 
+// ---- 要比較哪幾個排程器：每個情境各記一份，存在 localStorage
+const COMPARE_KEY = 'sched-evolution:compare';
+const compareState: Record<string, string[]> = (() => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(COMPARE_KEY) ?? '{}') as Record<string, unknown>;
+    const known = new Set(variants.map((v) => v.id));
+    return Object.fromEntries(
+      Object.entries(raw)
+        .filter((kv): kv is [string, string[]] => Array.isArray(kv[1]))
+        .map(([k, ids]) => [k, ids.filter((id) => known.has(id))] as [string, string[]])
+        .filter(([, ids]) => ids.length > 0),
+    );
+  } catch {
+    return {};
+  }
+})();
+
+/** 這個情境要比較的排程器，依年代排 */
+function compared(sc: Scenario): SchedVariant[] {
+  const ids = compareState[sc.id] ?? (sc.compare.length ? sc.compare : DEFAULT_COMPARE);
+  return variants.filter((v) => ids.includes(v.id));
+}
+
+/** ids = null：回到情境的建議組合 */
+function setCompared(sc: Scenario, ids: string[] | null): void {
+  if (ids) compareState[sc.id] = ids;
+  else delete compareState[sc.id];
+  try {
+    localStorage.setItem(COMPARE_KEY, JSON.stringify(compareState));
+  } catch {
+    // 私密瀏覽或停用儲存空間時，只在這次瀏覽有效
+  }
+}
+
+function comparePicker(sc: Scenario): void {
+  const box = $('schedPick');
+  const sel = compared(sc).map((v) => v.id);
+  box.innerHTML = '<span class="pick-label">比較</span>';
+  for (const v of variants) {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = sel.includes(v.id);
+    // 至少留一個
+    input.disabled = input.checked && sel.length === 1;
+    input.addEventListener('change', () => {
+      const ids = variants.filter((d) => (d.id === v.id ? input.checked : sel.includes(d.id))).map((d) => d.id);
+      setCompared(sc, ids);
+      rebuild();
+    });
+    label.title = v.title;
+    label.append(input, document.createTextNode(v.short));
+    box.append(label);
+  }
+  if (compareState[sc.id] && sc.compare.join() !== sel.join()) {
+    const reset = document.createElement('button');
+    reset.type = 'button';
+    reset.textContent = '這個情境的建議組合';
+    reset.addEventListener('click', () => {
+      setCompared(sc, null);
+      rebuild();
+    });
+    box.append(reset);
+  }
+}
+
 function simulate(sc: Scenario): { runs: RunData[]; gpsShare: number[] } {
   const gps = simulateGps(sc.tasks, { duration: DURATION });
   const gpsShare = gps.tasks.map((t) => t.runtime / DURATION);
-  const runs = variants.map((def) => {
+  const runs = compared(sc).map((def) => {
     const flags = flagState.get(def.id)!;
     const changed = changedFlags(def, flags);
     const rec = new RunRecorder();
     const shadow = new GpsShadow({ record: true });
-    const sim = new Simulator(def.make(flags), def.tasks(sc.tasks, flags), { duration: DURATION, observers: [rec, shadow] });
+    const sim = new Simulator(def.make(flags), def.tasks(sc.tasks, flags), { duration: DURATION, hz: def.hz, observers: [rec, shadow] });
     const summary = summarize(sim.run());
     const dflt = defaultFlags(def);
-    const base = changed.length ? summarize(new Simulator(def.make(dflt), def.tasks(sc.tasks, dflt), { duration: DURATION }).run()) : null;
+    const base = changed.length ? summarize(new Simulator(def.make(dflt), def.tasks(sc.tasks, dflt), { duration: DURATION, hz: def.hz }).run()) : null;
     const label = changed.length ? `${def.title}（改過開關）` : def.title;
     return { def, flags, changed, label, summary, base, rec, shadow, names: sc.tasks.map((t) => t.name) };
   });
@@ -368,7 +434,7 @@ function latencyChart(sc: Scenario, runs: RunData[]): string {
   const names = idx.map((i) => `<span><span class="swatch" style="background:${taskColor(i)}"></span>${sc.tasks[i]!.name} 的平均喚醒延遲</span>`).join('');
   return `<div class="viz">
     <div class="viz-title">延遲：醒來後等多久才輪到它</div>
-    <div class="viz-sub">越短越好。這是 ${idx.map((i) => sc.tasks[i]!.name).join('、')} 在乎的。</div>
+    <div class="viz-sub">${sc.latencyNote ?? `越短越好。這是 ${idx.map((i) => sc.tasks[i]!.name).join('、')} 在乎的。`}</div>
     <div class="viz-legend">${names}<span><span class="swatch" style="background:var(--fg);width:2px"></span>p99：把每次的等待排序，第 99% 的那一次</span></div>
     ${rows.join('')}${p99Note}
   </div>`;
@@ -407,6 +473,12 @@ function fairnessChart(sc: Scenario, runs: RunData[], gpsShare: number[]): strin
   </div>`;
 }
 
+/** 只列出目前有在比較的排程器的結論 */
+function takeaways(sc: Scenario): string[] {
+  const ids = new Set(data.runs.map((r) => r.def.id));
+  return sc.takeaway.flatMap((x) => (typeof x === 'string' ? [x] : ids.has(x.variant) ? [x.text] : []));
+}
+
 function resultsSection(sc: Scenario): string {
   const changed = data.runs.filter((r) => r.changed.length);
   const warn = changed.length
@@ -417,7 +489,9 @@ function resultsSection(sc: Scenario): string {
     ${latencyChart(sc, data.runs)}
     ${fairnessChart(sc, data.runs, data.gpsShare)}
     <details class="takeaway"><summary>怎麼解讀<span class="more">先試著關掉幾個開關，再打開</span></summary>
-    <ul>${sc.takeaway.map((x) => `<li>${x}</li>`).join('')}</ul></details>`;
+    <ul>${takeaways(sc)
+      .map((x) => `<li>${x}</li>`)
+      .join('')}</ul></details>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -481,8 +555,8 @@ function featureBar(run: RunData, sc: Scenario): HTMLElement {
     const name = document.createElement('span');
     name.className = 'term';
     name.tabIndex = 0;
-    name.dataset.term = `${f.key}（sched_feat）`;
-    name.dataset.tip = `開著：${f.on}　關掉：${f.off}`;
+    name.dataset.term = f.sim ? `${f.key}（模擬器的開關）` : `${f.key}（sched_feat）`;
+    name.dataset.tip = `開著：${f.on}　關掉：${f.off}` + (f.sim ? '　這一版 kernel 沒有 sched_feat，這是模擬器為了比較加的開關，預設開著就是 kernel 的行為。' : '');
     name.textContent = f.key;
     label.append(input, name);
     row.append(label);
@@ -531,6 +605,7 @@ function zoomHint(sc: Scenario): void {
   if (!sc.zoom) return;
   const z = sc.zoom;
   box.innerHTML = `<span>${z.text}</span><button type="button">看 ${z.width}ms（lag 圖共用刻度）</button>`;
+  linkTermsIn(box.querySelector('span')!);
   box.querySelector('button')!.addEventListener('click', () => {
     widthSel.value = String(z.width);
     sharedLag.checked = true;
@@ -542,9 +617,12 @@ function zoomHint(sc: Scenario): void {
 function rebuild(): void {
   const sc = scenarios.find((s) => s.id === scenarioSel.value)!;
   $('scenarioCard').innerHTML = scenarioCard(sc);
+  linkTermsIn($('scenarioCard'));
+  comparePicker(sc);
   zoomHint(sc);
   data = simulate(sc);
   $('results').innerHTML = resultsSection(sc);
+  linkTermsIn($('results'));
   panels.innerHTML = '';
   charts = data.runs.map((run) => {
     const el = document.createElement('section');
@@ -566,6 +644,9 @@ function rebuild(): void {
       <div class="chart-label readout">&nbsp;</div>
       <div class="metrics">${metricsTable(run, data.gpsShare)}</div>`;
     el.querySelector('.feat-slot')!.replaceWith(featureBar(run, sc));
+    // 排程器說明與關掉開關的說明：每個面板各自從頭標
+    const seen = new Set<string>();
+    for (const t of el.querySelectorAll('.note, .feat-desc')) linkTermsIn(t, seen);
     panels.append(el);
     const c: Chart = {
       timeline: el.querySelector<HTMLCanvasElement>('canvas.timeline')!,
@@ -610,7 +691,7 @@ function rebuild(): void {
       const idx = Math.max(0, Math.min(events.length - 1, c.selIdx + d));
       if (events[idx]) select(events[idx]!.t, c, idx);
     };
-    // toggle 不會冒泡，用 capture 接；三個排程器的展開狀態一起變
+    // toggle 不會冒泡，用 capture 接；所有排程器的展開狀態一起變
     c.insp.body.addEventListener(
       'toggle',
       (e) => {
@@ -676,7 +757,7 @@ function updateView(): void {
 }
 
 function draw(): void {
-  // 共用刻度：三張 lag 圖用同一個縱軸，振幅才能直接比
+  // 共用刻度：每張 lag 圖用同一個縱軸，振幅才能直接比
   const maxes = charts.map((c) => lagMax(c.run, view));
   const shared = Math.max(...maxes, 1 * US);
   charts.forEach((c, i) => {
@@ -703,11 +784,15 @@ function tourSteps(): TourStep[] {
       title: '為什麼這樣決定',
       body: '這裡用一句話說明那一刻排程器怎麼選。點時間軸任何地方就換成那一刻，點在淺色段可以看它為什麼沒搶到 CPU。◀ ▶ 逐個決策前進。',
     },
-    {
-      target: () => panel(1) ?? null,
-      title: '上下比較',
-      body: `三個排程器上下排，跑的是同一組程式，時間軸的刻度對齊。往下對同一個時刻，比比看 ${first} 在各個排程器裡排隊多久。`,
-    },
+    ...(panels.children.length > 1
+      ? [
+          {
+            target: () => panel(1) ?? null,
+            title: '上下比較',
+            body: `${panels.children.length} 個排程器上下排，跑的是同一組程式，時間軸的刻度對齊。往下對同一個時刻，比比看 ${first} 在各個排程器裡排隊多久。要比較哪幾個，在上方的「比較」勾選。`,
+          },
+        ]
+      : []),
     {
       target: () => q(0, 'canvas.lag'),
       title: 'lag 圖',

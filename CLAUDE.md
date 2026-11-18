@@ -149,3 +149,17 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 介紹頁拿掉「雲端資源的底層」卡片（KVM、steal time、Kubernetes）：本站沒有多核與 cgroup，讀者無法驗證。之後若做到 cgroup 再考慮。
 
 - 2026-11-18：拿掉模擬頁的「動手試」卡片（使用者不喜歡先猜再看答案）。改成 `Scenario.featNotes`：關掉某個 sched_feat 時，開關列下方顯示這個情境專屬的原因（一兩句，不寫數字），再加一行現算的前後數字（喚醒延遲、CPU 比例、context switch）；沒有專屬說明的開關用 `Feature.off`。情境 5 的觀察題改成 `Scenario.zoom` 提示列。測試 `test/events.test.ts` 檢查說明的開關存在、寫「完全不變」的真的不變、其他的真的有變。
+
+- 2026-11-18：O(n) 2.4.0 與 O(1) 2.6.0。
+  - 原始碼：`kernel-src/v2.4.0/`、`kernel-src/v2.6.0/`（kernel.org tarball，`fetch-kernel-src.sh` 只解出 `kernel/sched.c`、`fork.c`、`timer.c`、`include/linux/sched.h`）。HZ 照 i386 預設：2.4 是 100，2.6.0 是 1000；`SchedVariant.hz` 傳給引擎。
+  - `src/sched/on-v2.4.0.ts`（`goodness()`、`for_each_task` 重算、`reschedule_idle()` 的 +2 門檻、idle 借 mm）、`src/sched/o1-v2.6.0.ts`（prio_array + bitmap、`recalc_task_prio()`、`TASK_INTERACTIVE`、`EXPIRED_STARVING`、`TIMESLICE_GRANULARITY`、i386 32 位元溢位）。筆記 `notes/07-o1-v2.6.0.md`、`notes/08-on-v2.4.0.md`，測試 `test/o1-v2.6.0.test.ts`、`test/on-v2.4.0.test.ts`，共通測試的 legacy 部分在 `test/common.test.ts`。
+  - 2.6.0 沒有 sched_feat。開關是模擬器加的（`Feature.sim`，提示裡註明）：O(1) 的 `sleep_avg` / `TASK_INTERACTIVE` / `EXPIRED_STARVING` / `TIMESLICE_GRANULARITY`，O(n) 的 `for_each_task`。
+  - 簡化：fork 沒有真的 parent，假設是 sleep_avg 滿、時間片滿的 shell（O(1) 新 task bonus +4、時間片 51 tick；O(n) counter 是 NICE_TO_TICKS 的一半）。前一秒的數字會受影響，已寫在面板說明。
+  - 模擬頁加「比較」勾選（`comparePicker()`）：每個情境有建議組合 `Scenario.compare`，使用者改過的存在 localStorage，至少留一個；結論改成 `Takeaway { variant, text }`，只列出有在比較的。決策檢視：O(1) 畫 prio_array 的格子（active / expired × prio），O(n) 畫 goodness 長條（串列順序），在 `src/ui/inspect-legacy.ts`。
+  - 新增比較情境 3（`cheat`：跑 2.3ms 睡 0.83ms）：O(1) 給它 67%（GPS 29.8%），關掉 `TASK_INTERACTIVE` 回到 33.7%；O(n) 只給 12%；CFS 32.7%。
+  - 發現：O(1) 關掉 `sleep_avg` 後，會睡覺的 task 幾乎拿不到 CPU（情境 4 audio 0.17%、平均等 189ms），active 一空就和 expired 交換，醒來排在拿了新時間片的 hog 後面。`EXPIRED_STARVING` 的門檻是 1.02s × nr_running，四個情境都用不到。
+  - 發現：2.4 的 tick dodging（每 10ms 跑 9.4ms、tick 前睡著）拿到 86.5%，對齊 tick，只放在測試，沒做成情境。
+  - 待辦：比較情境 1（大量 task，O(n) 成本線性上升）還沒做，時間軸放不下幾十列，考慮改成「成本 vs task 數」的圖；原始碼頁還沒有 O(1)、O(n) 的片段；學習路線還沒有 O(n)、O(1) 的章節。
+
+- 2026-11-18：模擬頁的名詞改成白話帶出。O(1) 的 active / expired 一律寫成「這一輪／下一輪」（決策摘要、開關提示、排程器說明、情境文字）；CFS 的 vslice、curr、`sched_attr.sched_runtime` 等也改寫。排程器說明、開關說明、情境卡片、結論、zoom 提示、決策摘要都套上 `linkTermsIn` / `linkTerms`。名詞表新增 `EXPIRED_STARVING`、`TIMESLICE_GRANULARITY`、HZ 與 jiffies、fork。
+  - 待辦：學習路線還沒有 O(n)、O(1) 的章節，模擬頁是讀者唯一碰到 active / expired、goodness、counter 的地方；第 5 章寫了「本站的筆記發現」，和「網頁不提 repo 內部」的原則不一致。

@@ -12,7 +12,7 @@ export interface Term {
 export const terms: Term[] = [
   {
     name: '想跑（runnable）',
-    match: ['runnable'],
+    match: ['runnable', 'runqueue'],
     def: '程式有事要做，在佇列（run queue）上等 CPU。時間軸上的淺色段。正在 CPU 上跑的那一個叫 curr，也算在想跑的程式裡。',
   },
   {
@@ -23,7 +23,7 @@ export const terms: Term[] = [
   {
     name: 'tick',
     match: ['tick'],
-    def: '每 1ms 一次的時鐘中斷（HZ=1000）。排程器在 tick 時檢查 curr 是不是跑太久了。沒有人睡覺或醒來的話，換人只會發生在 tick 上，所以 0.75ms 的 slice 實際上會跑到 1ms。',
+    def: '週期性的時鐘中斷。2.6 以後 HZ=1000，每 1ms 一次；2.4 是 HZ=100，每 10ms 一次。排程器在 tick 時檢查 curr 是不是跑太久了。沒有人睡覺或醒來的話，換人只會發生在 tick 上，所以 EEVDF 0.75ms 的 slice 實際上會跑到 1ms。',
   },
   {
     name: 'nice 與權重',
@@ -44,6 +44,66 @@ export const terms: Term[] = [
     name: 'throughput（吞吐量）',
     match: ['throughput', '吞吐量'],
     def: '單位時間完成的工作量。context switch 越頻繁，花在切換（以及 cache、TLB 重新填）的時間越多，throughput 越低；但切換太少，醒來的 task 要等得久。本站的模擬不計切換成本，以 context switch 次數當作指標。',
+  },
+  {
+    name: '時間片（time slice）',
+    match: ['time_slice', '時間片'],
+    def: 'O(n) 與 O(1) 分給 task 的 CPU 時間，以 tick 為單位：每個 tick 由正在跑的 task 扣一格，扣完就換人，不管那個 tick 裡它實際跑了多久。2.4.0（HZ=100）nice 0 是 6 個 tick = 60ms；2.6.0（HZ=1000）nice 0 是 102ms，nice −20 是 200ms，nice 19 是 10ms。CFS 以後沒有固定的時間片。',
+  },
+  {
+    name: 'counter',
+    match: ['counter'],
+    def: '2.4 的 task 這一輪還剩幾個 tick。tick 時 curr 扣 1；runqueue 上所有 task 都扣到 0 時，系統裡每一個 task（包括睡著的）重算 counter = counter / 2 + NICE_TO_TICKS(nice)，所以常睡的 task 會累積到將近兩倍。',
+  },
+  {
+    name: 'goodness',
+    match: ['goodness'],
+    def: '2.4 的 goodness() 給每個 task 的分數：counter 是 0 就是 0，否則是 counter + 20 − nice，和上一個 task 是同一個程式（同一個 mm）再加 1。schedule() 每次從頭掃過整條 runqueue，選分數最高的。',
+  },
+  {
+    name: 'prio 與 static_prio',
+    match: ['static_prio', 'prio'],
+    def: 'O(1) 的優先權，100–139，數字越小越優先。static_prio = 120 + nice，只看 nice；prio = static_prio − bonus，是實際拿來排程的。',
+  },
+  {
+    name: 'sleep_avg 與 bonus',
+    match: ['sleep_avg', 'bonus'],
+    def: 'O(1) 估計 task 有多常在睡的量，0 到 1020ms：睡覺時加（sleep_avg 越低加得越快，最多 10 倍），在 CPU 上跑時扣。換算成 bonus −5 到 +5：睡得多的 prio 最多提高 5 級，一直在跑的降 5 級。',
+  },
+  {
+    name: 'TASK_INTERACTIVE',
+    match: ['TASK_INTERACTIVE'],
+    def: 'O(1) 判斷互動型的條件：prio 至少比 static_prio 好 DELTA 級（nice 0 是 2 級，也就是 bonus ≥ +2；nice 越大越難）。互動型的 task 用完時間片可以排回 active（這一輪），不用等到下一輪。',
+  },
+  {
+    name: 'prio_array',
+    match: ['prio_array', 'bitmap'],
+    def: 'O(1) 的資料結構：每個 prio 一條 FIFO 佇列，共 140 條，加一張 140 bit 的 bitmap，哪一條非空對應的 bit 就是 1。挑選時用 sched_find_first_bit() 找第一個 1，成本固定，和 task 數量無關。',
+  },
+  {
+    name: 'active 與 expired',
+    match: ['active', 'expired'],
+    def: 'O(1) 把 task 分成兩組，各是一個 prio_array。active 是「這一輪」：還有時間片的 task 在這裡，只從這裡挑。expired 是「下一輪」：時間片用完的 task 拿到新的時間片後排到這裡等，優先權再高也要等 active 空了才輪得到（互動型的例外，可以排回 active）。active 空了就把兩個指標對調，下一輪開始。',
+  },
+  {
+    name: 'EXPIRED_STARVING',
+    match: ['EXPIRED_STARVING', 'STARVATION_LIMIT'],
+    def: 'O(1) 防止 starvation 的檢查：expired 裡最早排進去的 task 已經等超過 STARVATION_LIMIT × task 數（2.6.0 約 1 秒 × task 數），互動型的 task 用完時間片也不能再排回 active，要一起去 expired。',
+  },
+  {
+    name: 'TIMESLICE_GRANULARITY',
+    match: ['TIMESLICE_GRANULARITY'],
+    def: 'O(1) 把互動型 task 的長時間片切成小段（10ms 起）。每跑完一段，就排到同優先權佇列的尾端，讓同優先權的 task 輪流，不會被一個互動型 task 一次占住上百 ms。',
+  },
+  {
+    name: 'HZ 與 jiffies',
+    match: ['HZ', 'jiffies'],
+    def: 'HZ 是每秒幾次 tick：2.4 的 i386 預設 100（每 10ms 一次），2.6 起預設 1000（每 1ms 一次）。jiffies 是開機以來的 tick 數，O(n) 與 O(1) 用它計時。',
+  },
+  {
+    name: 'fork',
+    match: ['fork'],
+    def: '建立新的 task。新 task 從 parent 複製一份狀態：O(n) 與 O(1) 裡，parent 剩下的時間片對半分給自己和 child；O(1) 的 sleep_avg 也從 parent 繼承（打折）。所以剛 fork 出來的 task 會帶著 parent 的優先權一段時間。',
   },
   {
     name: 'GPS',

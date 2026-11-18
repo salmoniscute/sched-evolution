@@ -85,6 +85,15 @@ h1 { font-size: 22px; margin: 20px 0 4px; }
 .controls label { display: flex; gap: 6px; align-items: center; }
 .controls .grow { flex: 1; min-width: 240px; }
 .controls .grow input { flex: 1; }
+/* 要比較哪幾個排程器：自己一列，勾選框做成小膠囊 */
+.pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; flex-basis: 100%; }
+.pick-label { color: var(--muted); margin-right: 2px; }
+.controls .pick label {
+  gap: 5px; padding: 2px 10px 2px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); cursor: pointer; font-size: 12.5px;
+}
+.controls .pick label:has(input:checked) { border-color: var(--sel); background: color-mix(in srgb, var(--sel) 10%, var(--bg)); }
+.controls .pick label:has(input:disabled) { cursor: default; }
+.pick button { font: inherit; font-size: 12px; color: var(--muted); background: none; border: 0; text-decoration: underline; cursor: pointer; padding: 2px 4px; }
 select, input { font: inherit; color: inherit; }
 select { background: var(--panel); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
 output { font-variant-numeric: tabular-nums; min-width: 6em; }
@@ -306,6 +315,7 @@ figure.code .lines {
 .insp-line .nm.picked { fill: var(--fg); font-weight: 600; }
 .insp-line .hollow { fill: var(--bg); stroke-width: 2; }
 .insp-line .ring { fill: none; stroke: var(--sel); stroke-width: 1.5; }
+.insp-line .lane { fill: color-mix(in srgb, var(--muted) 7%, transparent); }
 .insp-legend { color: var(--muted); font-size: 12px; margin: 2px 0 6px; }
 .insp-table { width: auto; min-width: 60%; margin-top: 4px; }
 .insp-table tr.chosen td { background: color-mix(in srgb, var(--sel) 9%, transparent); font-weight: 600; }
