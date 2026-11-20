@@ -424,6 +424,19 @@ figure.dg figcaption { color: var(--muted); font-size: 12.5px; margin-top: 4px; 
 .w-slice { display: flex; gap: 6px; align-items: center; font-size: 13px; }
 .w-slice input { width: 120px; accent-color: var(--c); }
 .w-slice output { min-width: 3.6em; font-variant-numeric: tabular-nums; }
+/* 「越補越多的規則」表：第一欄是 kernel 名稱，不要被切斷 */
+table.eq-ex.wrap.rules td:first-child code.ic { white-space: nowrap; overflow-wrap: normal; }
+@media (max-width: 640px) { table.eq-ex.wrap.rules td:first-child code.ic { white-space: normal; overflow-wrap: anywhere; } }
+/* O(1) 的 prio_array 小圖 */
+.o1-panel { fill: var(--panel); stroke: var(--border); }
+.o1-panel.cur { stroke: var(--sel); }
+.o1-bit { fill: var(--bg); stroke: var(--border); }
+.o1-bit.on { fill: color-mix(in srgb, var(--sel) 18%, transparent); stroke: var(--sel); }
+.o1-bit-t { fill: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+.o1-bit-t.on { fill: var(--fg); font-weight: 600; }
+.o1-chip { fill: var(--c); }
+.o1-chip-t { fill: #fff; font-size: 13px; font-weight: 700; }
+.o1-ring { fill: none; stroke: var(--sel); stroke-width: 1.5; }
 .dg-comp { fill: color-mix(in srgb, var(--series-4) 14%, transparent); }
 .dg-ghost { fill: none; stroke: var(--c); stroke-width: 1.5; stroke-dasharray: 2 2; }
 .explain .try { color: var(--fg); font-size: 13.5px; border-left: 3px solid var(--sel); padding-left: 10px; }

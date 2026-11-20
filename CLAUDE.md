@@ -162,4 +162,12 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 待辦：比較情境 1（大量 task，O(n) 成本線性上升）還沒做，時間軸放不下幾十列，考慮改成「成本 vs task 數」的圖；原始碼頁還沒有 O(1)、O(n) 的片段；學習路線還沒有 O(n)、O(1) 的章節。
 
 - 2026-11-18：模擬頁的名詞改成白話帶出。O(1) 的 active / expired 一律寫成「這一輪／下一輪」（決策摘要、開關提示、排程器說明、情境文字）；CFS 的 vslice、curr、`sched_attr.sched_runtime` 等也改寫。排程器說明、開關說明、情境卡片、結論、zoom 提示、決策摘要都套上 `linkTermsIn` / `linkTerms`。名詞表新增 `EXPIRED_STARVING`、`TIMESLICE_GRANULARITY`、HZ 與 jiffies、fork。
-  - 待辦：學習路線還沒有 O(n)、O(1) 的章節，模擬頁是讀者唯一碰到 active / expired、goodness、counter 的地方；第 5 章寫了「本站的筆記發現」，和「網頁不提 repo 內部」的原則不一致。
+  - 待辦：第 5 章寫了「本站的筆記發現」，和「網頁不提 repo 內部」的原則不一致。
+
+- 2026-11-19：學習路線加入 O(1) 兩章，插在 GPS／lag 之後（共 10 章）：第 4 章「O(1)：優先權加時間片」（2.4 goodness 的 O(n)、bitmap 挑選、`static_prio` 與時間片、active / expired、sleep_avg 與 bonus、`TASK_INTERACTIVE`，深入區塊放 2.4 counter 的不動點 2T 和 `EXPIRED_STARVING`），第 5 章「為什麼離開 O(1)」（sleep_avg 的加扣、被騙的門檻、情境 3 的數字、補丁規則表、nice 的意義不一致、2007 年 RSDL/SD 與 CFS 公告）。
+  - 小圖在 `src/ui/o1-widgets.ts`：兩個 prio_array（可讓 C 變 interactive，看 A、B 等到 `EXPIRED_STARVING`）、sleep_avg 隨「跑 r 睡 s」的變化（照 2.6.0 的整數運算，從 0 開始跑 3 秒）。
+  - 推導：sleep_avg 停在 b* = 10 − r/s，但 `CURRENT_BONUS` 是整數，會在 ⌈b*⌉ 那一級的下緣擺動，睡醒時是 ⌈b*⌉、跑完時是 ⌊b*⌋。時間片多半在跑的時候用完，所以「留在這一輪」要 ⌊b*⌋ ≥ 7，即 r ≤ 3s（用掉 75% 的 CPU 也算）；睡醒時算 interactive 只要 r < 4s（80%）。
+  - nice 差一級的效果：O(1) 時間片線性，nice 0 vs 1 是 102:97，nice 18 vs 19 是 14:10；CFS 每級都約 1.25 倍。
+  - 內文的章節引用改寫成 `<a class="chref" data-ref="章節 id">`，章號由 `learn.ts` 填，之後插章不用手動改號。`#/sim/<情境 id>` 可以直接開某個情境。
+  - CFS 公告原文從 LWN 的存檔讀（lwn.net/Articles/230501），lkml.org 對自動抓取擋掉。沒有 “80% of CFS's design” 那句，別引用。
+  - 待辦：O(n) 只在第 4 章帶過，沒有獨立章節；原始碼頁還沒有 O(1)、O(n) 的片段。

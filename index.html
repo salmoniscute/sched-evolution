@@ -74,7 +74,7 @@
 
         <h2>怎麼使用這個網站</h2>
         <div class="tour-cards three">
-          <a class="tcard" href="#/learn/problem"><span class="tnum">1</span><b>學習路線</b><span>八個短章，每章一個問題、一條公式、一張可以操作的小圖。從權重一路走到 EEVDF 與延遲的取捨。</span></a>
+          <a class="tcard" href="#/learn/problem"><span class="tnum">1</span><b>學習路線</b><span>十個短章，每章一個問題、一條公式、一張可以操作的小圖。從權重、O(1) 一路走到 EEVDF 與延遲的取捨。</span></a>
           <a class="tcard" href="#/sim"><span class="tnum">2</span><b>模擬</b><span>從 2.4 的 O(n) 到 6.12 的 EEVDF，挑幾個 CPU scheduler 並排執行同一組工作負載。點時間軸看每個決策的理由，關掉開關看差在哪裡。</span></a>
           <a class="tcard" href="#/source"><span class="tnum">3</span><b>原始碼</b><span>task 被喚醒時放在哪裡，逐步對照 CFS 與 EEVDF 當年的 kernel 程式碼。</span></a>
         </div>
@@ -123,7 +123,7 @@
           <figcaption>CPU scheduler 會在三種時機重新挑選：目前的 task 自己進入 sleep，CPU 空了出來；每 1ms 一次的 tick，檢查目前的 task 是否已經用完該分到的時間；有 task 被喚醒（或剛建立），判斷是否要讓它搶占（preempt）目前的 task。</figcaption>
         </figure>
         <p>那麼該挑誰呢？這取決於 task 需要什麼。像播放音樂、文字編輯器這類 interactive 的 task，平常大多在 sleep，每次醒來只用一點點 CPU，但必須馬上得到執行，否則就會聽到斷音、看到畫面卡頓，因此它們在意的是<b>延遲</b>（latency）。相對地，編譯這類 CPU-bound 的 task 永遠有事可做，晚個幾毫秒執行並無所謂，它們在意的是一段時間下來是否拿到<b>公平</b>的 CPU 份額。</p>
-        <p>麻煩的是，這兩種需求會互相拉扯：讓音樂播放器插隊固然降低了延遲，但它插隊所用的時間，其實是從編譯 task 那裡拿走的。接下來幾章先把「公平」定義清楚，再看 CFS 和 EEVDF 怎麼在公平之上處理延遲。</p>
+        <p>麻煩的是，這兩種需求會互相拉扯：讓音樂播放器插隊固然降低了延遲，但它插隊所用的時間，其實是從編譯 task 那裡拿走的。接下來幾章先把「公平」定義清楚，再看各代 CPU scheduler 怎麼回答：O(1) 用優先權加時間片，從行為猜誰需要快速回應；CFS 和 EEVDF 先保證公平，再在公平之上處理延遲。</p>
       </article>
 
       <article class="card explain chapter" data-ch="weight" data-title="公平的定義：權重" data-q="每個 task 應該分到多少 CPU？">
@@ -185,7 +185,7 @@
           <summary>深入：想執行的 task 會變時，GPS 怎麼定義</summary>
           <p>上面的 <span class="tex">S_i = \frac{w_i}{W} t</span> 假設 <span class="tex">W</span> 不變。一般的定義是用速度來寫：時刻 <span class="tex">\tau</span> 所有想執行的 task 權重加起來是 <span class="tex">W(\tau)</span>，task <span class="tex">i</span> 這一刻拿到 CPU 的速度是</p>
           <div class="tex-block">\frac{dS_i}{d\tau} = \begin{cases} \dfrac{w_i}{W(\tau)} & i \text{ 想執行} \\[6pt] 0 & i \text{ 在 sleep} \end{cases}</div>
-          <p>把速度從 0 積到 <span class="tex">t</span>，就是 GPS 到時刻 <span class="tex">t</span> 為止會給 <span class="tex">i</span> 的 CPU 時間 <span class="tex">S_i(t)</span>。task 在 sleep 時 GPS 不分 CPU 給它，<span class="tex">S_i</span> 和 <span class="tex">s_i</span> 都不動，所以 lag 停在睡前的值，醒來接著算。這是一個選擇，不是唯一的算法；第 8 章會看到 CFS 和 v6.12 在這裡的做法不一樣。</p>
+          <p>把速度從 0 積到 <span class="tex">t</span>，就是 GPS 到時刻 <span class="tex">t</span> 為止會給 <span class="tex">i</span> 的 CPU 時間 <span class="tex">S_i(t)</span>。task 在 sleep 時 GPS 不分 CPU 給它，<span class="tex">S_i</span> 和 <span class="tex">s_i</span> 都不動，所以 lag 停在睡前的值，醒來接著算。這是一個選擇，不是唯一的算法；<a class="chref" data-ref="tradeoff"></a>會看到 CFS 和 v6.12 在這裡的做法不一樣。</p>
         </details>
         <details class="deep">
           <summary>深入：為什麼是鋸齒，鋸齒能有多高</summary>
@@ -200,12 +200,146 @@
           <summary>深入：為什麼所有 lag 加起來永遠是 0</summary>
           <p>只要有 task 想執行，真實的 CPU scheduler 和 GPS 都不會讓 CPU 閒著，所以同一段時間兩邊發出去的 CPU 總量一樣多。把所有想執行的 task 加起來：</p>
           <div class="tex-block">\sum_i \frac{dS_i}{dt} = \sum_i \frac{w_i}{W} = 1, \qquad \sum_i \frac{ds_i}{dt} = 1 \quad\Longrightarrow\quad \frac{d}{dt}\sum_i \text{lag}_i = 0</div>
-          <p>sleep 中的 task 兩邊都是 0，lag 不動，也不影響總和。一開始大家的 lag 都是 0，所以總和永遠是 0：有人多拿，就一定有人少拿。因此看圖時不能只看一條線，audio 往下多少，cc1 和 cc2 合起來就往上多少。第 6 章會看到，EEVDF 的 <span class="tex">V</span> 正是靠這個性質算出來的。</p>
+          <p>sleep 中的 task 兩邊都是 0，lag 不動，也不影響總和。一開始大家的 lag 都是 0，所以總和永遠是 0：有人多拿，就一定有人少拿。因此看圖時不能只看一條線，audio 往下多少，cc1 和 cc2 合起來就往上多少。<a class="chref" data-ref="eevdf"></a>會看到，EEVDF 的 <span class="tex">V</span> 正是靠這個性質算出來的。</p>
+        </details>
+      </article>
+
+      <article class="card explain chapter" data-ch="o1" data-title="O(1)：優先權加時間片" data-q="不照比例分，只排先後順序，夠用嗎？">
+        <p><a class="chref" data-ref="lag"></a>有了衡量公平的尺，但 Linux 的 CPU scheduler 一開始並不是照比例分配 CPU 來設計的。2.6 的 O(1)（Ingo Molnar，2002 年）比較接近作業系統課本上的優先權排程：每個 task 有一個優先權和一段時間片（time slice），先挑優先權最高的，讓它跑完時間片再換人。這一章看它怎麼挑、怎麼分時間片，以及怎麼照顧 interactive task。</p>
+
+        <h2>名字裡的 O(1)</h2>
+        <p>先看它取代的 2.4（O(n)）。2.4 每次 <code>schedule()</code> 都把 runqueue 上的 task 全部走過一遍，用 <code>goodness()</code> 打分數，挑最高的：</p>
+        <div class="tex-block">\text{goodness}_i = \text{counter}_i + 20 - \text{nice}_i</div>
+        <p><code>counter</code> 是剩下的時間片（以 tick 計），用完時 goodness 是 0，不會被挑。runqueue 上有 <span class="tex">n</span> 個 task，每次挑選就要算 <span class="tex">n</span> 次；所有 runnable task 的 counter 都用完時，還要走過系統上的每一個 task 重新發時間片。task 一多，CPU scheduler 自己就成了負擔。</p>
+        <p>O(1) 把 140 級優先權各放一條佇列，再用一個 140 位元的 bitmap 記錄哪幾級有 task。數字越小越優先，挑選就是找第一個非空的佇列，取它的隊首：</p>
+        <div class="tex-block">p^{*} = \min\{\, p \mid \text{queue}[p] \ne \varnothing \,\}</div>
+        <p>這一步由 <code>sched_find_first_bit()</code> 在 bitmap 上找第一個 1，步數固定，和 task 有幾個無關，這就是名字裡的 O(1)。</p>
+        <details class="deep">
+          <summary>深入：2.4 的 counter 也偷偷照顧了 sleeper</summary>
+          <p>2.4 重新發時間片時，用 <code>for_each_task</code> 走過系統上所有 task，連 sleep 中的也算：</p>
+          <div class="tex-block">\text{counter} \leftarrow \left\lfloor \frac{\text{counter}}{2} \right\rfloor + T, \qquad T = \texttt{NICE\_TO\_TICKS}(\text{nice})</div>
+          <p>CPU-bound 的 task 每次都把 counter 用到 0，重算後就是 <span class="tex">T</span>。一直在睡的 task 用不完，每次重算保留一半再加 <span class="tex">T</span>，會逼近不動點 <span class="tex">c = c/2 + T</span>，也就是 <span class="tex">c = 2T</span>。counter 越大 goodness 越高，所以 sleeper 醒來時大多能排在 CPU-bound task 前面，但多出來的最多就是一個時間片。</p>
+        </details>
+
+        <h2>時間片與優先權</h2>
+        <p>nice 先換成 <code>static_prio</code>：</p>
+        <div class="tex-block">\texttt{static\_prio} = 120 + \text{nice}</div>
+        <p>100 到 139 給一般的 task，0 到 99 留給 real-time。時間片依 <code>static_prio</code> 線性分配（<code>BASE_TIMESLICE</code>，HZ = 1000 時單位是 ms，整數除法）：</p>
+        <div class="tex-block">\text{slice} = 10 + \left\lfloor \frac{190 \times (139 - \texttt{static\_prio})}{39} \right\rfloor</div>
+        <table class="mini eq-ex">
+          <thead><tr><th>nice</th><th><code>static_prio</code></th><th>時間片</th></tr></thead>
+          <tbody>
+            <tr><td>−20</td><td>100</td><td>200 ms</td></tr>
+            <tr><td>0</td><td>120</td><td>102 ms</td></tr>
+            <tr><td>5</td><td>125</td><td>78 ms</td></tr>
+            <tr><td>19</td><td>139</td><td>10 ms</td></tr>
+          </tbody>
+        </table>
+        <p>真正拿來排序的不是 <code>static_prio</code>，而是在它上面加減 bonus 後的 <code>prio</code>，最後一節會講。</p>
+
+        <h2>兩輪：active 與 expired</h2>
+        <p>每個 runqueue 有兩個 <code>prio_array</code>。CPU scheduler 只從「這一輪」（active）挑。task 用完時間片時，<code>scheduler_tick()</code> 重算它的時間片和 <code>prio</code>，把它排到「下一輪」（expired）。等這一輪空了，<code>schedule()</code> 把兩個指標對調，下一輪就開始。對調指標是常數時間，所以 O(1) 不必像 2.4 那樣走過所有 task 重發時間片。</p>
+        <p>如果 task 都是 CPU-bound，也都沒被當成 interactive，每一輪每個 task 各跑一次自己的時間片，分到的比例就是時間片的比例：</p>
+        <div class="tex-block">\text{share}_i = \frac{\text{slice}_i}{\sum_j \text{slice}_j}</div>
+        <p>例如 nice 0 和 nice 5 各一個，nice 0 分到 <span class="tex">102 / (102 + 78) \approx 56.7\%</span>。<a class="chref" data-ref="weight"></a>的權重算出來是 <span class="tex">1024 / (1024 + 335) \approx 75.3\%</span>。同一組 nice 值，兩代 CPU scheduler 給的比例差很多，下一章會回來看這件事。</p>
+        <div class="widget" id="w-o1arrays"></div>
+        <p class="try">先按幾次「跑一個時間片」，看 A、B、C 怎麼從這一輪移到下一輪，以及這一輪空掉時的對調。接著讓 C 被判定為 interactive，按「跑 30 個」，看 A、B 等了多久才又輪到。</p>
+
+        <h2>照顧 interactive task：sleep_avg 與 bonus</h2>
+        <p>只看 nice 的話，editor 醒來得排在同一級的編譯 task 後面，可能要等上一整個時間片（102ms），打字就會卡。O(1) 沒有讓 task 表明「我需要快速回應」的介面，只能從行為猜：常常在睡的，大概就是 interactive。每個 task 有一個 <code>sleep_avg</code>（0 到 1020ms），睡覺時加、在 CPU 上跑時扣，再換算成 bonus：</p>
+        <div class="tex-block">\texttt{CURRENT\_BONUS} = \left\lfloor \frac{\texttt{sleep\_avg} \times 10}{1020} \right\rfloor, \qquad \text{bonus} = \texttt{CURRENT\_BONUS} - 5, \qquad \texttt{prio} = \texttt{static\_prio} - \text{bonus}</div>
+        <p>bonus 介於 −5 到 +5。nice 0 的 task，<code>sleep_avg</code> 滿了是 prio 115，一直在跑的是 prio 125。這個 prio 有兩個用處：</p>
+        <ul>
+          <li>喚醒時，醒來的 task 的 prio 比目前在跑的小，就搶占它（<code>TASK_PREEMPTS_CURR</code>）。editor 醒來能打斷編譯，靠的就是 bonus。</li>
+          <li>時間片用完時，夠 interactive 的 task 排回這一輪，不用等下一輪。條件是 <code>TASK_INTERACTIVE</code>：</li>
+        </ul>
+        <div class="tex-block">\texttt{prio} \le \texttt{static\_prio} - \Delta(\text{nice}), \qquad \Delta(0) = 2</div>
+        <p>nice 0 時就是 bonus ≥ +2，也就是 <code>CURRENT_BONUS</code> ≥ 7、<code>sleep_avg</code> ≥ 714ms。nice 越大 <span class="tex">\Delta</span> 越大，越難被當成 interactive；nice 19 永遠不會。上面小圖裡「讓 C 被判定為 interactive」就是第二條：C 在 prio 118，每次跑完時間片都排回這一輪，A、B 在 prio 125，只能一直等。</p>
+        <details class="deep">
+          <summary>深入：EXPIRED_STARVING，給 starvation 的保險</summary>
+          <p>interactive task 可以一直留在這一輪，其他 task 就可能一直輪不到。<code>scheduler_tick()</code> 在讓 interactive task 排回這一輪之前，會先檢查 <code>EXPIRED_STARVING()</code>：</p>
+          <div class="tex-block">\text{now} - \texttt{expired\_timestamp} \;\ge\; \texttt{STARVATION\_LIMIT} \times \texttt{nr\_running} + 1</div>
+          <p><code>expired_timestamp</code> 是這一輪第一次有 task 用完時間片的時刻，兩輪對調時歸零。<code>STARVATION_LIMIT</code> 是 1020 個 jiffy（約 1 秒），條件成立後，interactive task 用完時間片也得去下一輪。2.6.0 <code>kernel/sched.c</code> 的註解寫的是 “To guarantee that this does not starve expired tasks we ignore the interactivity of a task if the first expired task had to wait more than a 'reasonable' amount of time”。這是作業系統課本上 aging 的一種：等太久，優待就取消。不過門檻和 task 數成正比，三個 task 要等約 3 秒，對延遲來說已經很長。</p>
+        </details>
+        <p class="fine">簡化：小圖裡三個 task 都不睡覺，C 的 bonus 是直接給的；實際上 <code>sleep_avg</code> 每跑一點就扣一點。也沒有畫 <code>TIMESLICE_GRANULARITY</code>：interactive task 的時間片會切成小段，跑完一段就排到同一級的隊尾，和同一級的 task 輪流。</p>
+      </article>
+
+      <article class="card explain chapter" data-ch="why-o1" data-title="為什麼離開 O(1)" data-q="挑選已經是常數時間了，為什麼還要換掉？">
+        <p>O(1) 解決的是 2.4 的成本問題，這件事它做得很好。它被換掉，原因在上一章的最後一節：它得猜誰是 interactive。這一章先算出它怎麼被騙，再看為了防騙補上的規則，最後是 2007 年 CFS 登場時怎麼說。</p>
+
+        <h2>sleep_avg 怎麼加、怎麼扣</h2>
+        <p>task 醒來時，<code>recalc_task_prio()</code> 把睡眠時間 <span class="tex">s</span> 加進 <code>sleep_avg</code>，但先乘上一個倍數，<code>sleep_avg</code> 越低，倍數越大：</p>
+        <div class="tex-block">\texttt{sleep\_avg} \leftarrow \min\bigl(1020,\; \texttt{sleep\_avg} + s \times (10 - \texttt{CURRENT\_BONUS})\bigr)</div>
+        <p>（<code>CURRENT_BONUS</code> 是 10 時倍數取 1。）在 CPU 上跑的時間 <span class="tex">r</span>，<code>schedule()</code> 照實扣掉：</p>
+        <div class="tex-block">\texttt{sleep\_avg} \leftarrow \max(0,\; \texttt{sleep\_avg} - r)</div>
+        <p>kernel 的註解是 “The lower the sleep avg a task has the more rapidly it will rise with sleep time.”。用意是讓剛從 CPU-bound 轉成 interactive 的 task，例如編譯完回到提示字元等鍵盤的 shell，很快就能拿回 bonus。睡 1ms 最多能抵 10ms 的執行時間，這個不對稱就是可以利用的地方。</p>
+
+        <h2>用掉 75% 的 CPU，還算 interactive</h2>
+        <p>一個 task 重複「跑 <span class="tex">r</span>、睡 <span class="tex">s</span>」。<code>CURRENT_BONUS</code> 是 <span class="tex">b</span> 時，一次睡眠加 <span class="tex">s\,(10 - b)</span>，一次執行扣 <span class="tex">r</span>。加的比扣的多，<code>sleep_avg</code> 就往上爬；爬到加的不再比扣的多，就停住。打平的地方是</p>
+        <div class="tex-block">s\,(10 - b) = r \quad\Longrightarrow\quad b^{*} = 10 - \frac{r}{s}</div>
+        <p><code>CURRENT_BONUS</code> 是整數，所以 <code>sleep_avg</code> 會卡在 <span class="tex">\lceil b^{*} \rceil</span> 那一級的下緣上下擺動：剛睡醒時在 <span class="tex">\lceil b^{*} \rceil</span>，跑著跑著掉到 <span class="tex">\lfloor b^{*} \rfloor</span>。時間片多半是在跑的時候用完的，那時要 <span class="tex">\lfloor b^{*} \rfloor \ge 7</span>（上一章 nice 0 的 bonus ≥ +2）才能留在這一輪：</p>
+        <div class="tex-block">10 - \frac{r}{s} \ge 7 \;\Longleftrightarrow\; r \le 3s \;\Longleftrightarrow\; \frac{r}{r + s} \le 75\%</div>
+        <p>也就是說，只要每跑 3ms 至少睡 1ms，一個用掉四分之三 CPU 的 task 也能享有 interactive 的全部優待。醒來時的門檻更鬆：只要 <span class="tex">\lceil b^{*} \rceil \ge 7</span>，也就是 <span class="tex">r &lt; 4s</span>，用掉不到 80% 的 task 睡醒時都算 interactive。情境 3 的 cheat 每跑 2.3ms 睡 0.83ms，<span class="tex">r/s \approx 2.77</span>，<span class="tex">b^{*} \approx 7.23</span>，在 7 和 8 之間擺動，兩個門檻都過了。</p>
+        <div class="widget" id="w-sleepavg"></div>
+        <p class="try">按「cheat」，再把「每次睡」慢慢拖小：低於 0.77ms（<span class="tex">2.3 / 3</span>）時，跑到一半就會掉出 interactive 的區域；低於 0.58ms（<span class="tex">2.3 / 4</span>），連剛睡醒時也不算了。按「跑 3、睡 0.8」看兩者之間的情況：<span class="tex">r/s = 3.75</span>，剛睡醒時 bonus +2，跑著跑著掉到 +1。</p>
+        <p>被判定為 interactive 之後，cheat 醒來能打斷 cc（prio 117–118 比 125 優先），時間片用完又留在這一輪。模擬頁情境 3 跑 2 秒，cheat 拿到的 CPU：</p>
+        <table class="mini eq-ex">
+          <thead><tr><th></th><th>cheat 的 CPU 比例</th></tr></thead>
+          <tbody>
+            <tr><td>GPS（公平的份）</td><td>29.8%</td></tr>
+            <tr><td>O(1) 2.6.0</td><td>67.0%</td></tr>
+            <tr><td>O(1)，關掉 <code>TASK_INTERACTIVE</code></td><td>33.7%</td></tr>
+            <tr><td>O(1)，關掉 <code>sleep_avg</code></td><td>1.3%</td></tr>
+            <tr><td>CFS v2.6.24</td><td>32.7%</td></tr>
+          </tbody>
+        </table>
+        <p>關掉 <code>TASK_INTERACTIVE</code>，cheat 時間片用完就得去下一輪，比例回到三分之一左右，可見被騙走的主要是「用完時間片不必等下一輪」這項特權。關掉 <code>sleep_avg</code> 則矯枉過正：cheat 是不會被騙了，但真正的 interactive task 也失去照顧，情境 4 的 audio 平均要等 189ms，只拿到 0.17%。O(1) 照顧 interactive task 的手段只有這一個，拿不掉，只能繼續補。<a href="#/sim/cheat">到模擬頁看情境 3 →</a></p>
+
+        <h2>越補越多的規則</h2>
+        <p>2.6.0 的 <code>kernel/sched.c</code> 開頭寫著 “2003-09-03 Interactivity tuning by Con Kolivas.”。光是 <code>recalc_task_prio()</code> 和 <code>schedule()</code> 周圍，就有這些規則，每一條都在處理某一種被誤判的情況：</p>
+        <table class="mini eq-ex wrap rules">
+          <thead><tr><th>規則</th><th>做什麼</th><th>防的是</th></tr></thead>
+          <tbody>
+            <tr><td><code>JUST_INTERACTIVE_SLEEP</code></td><td>睡超過 815ms（nice 0）的，<code>sleep_avg</code> 直接設成 918ms，剛好夠 interactive，不給滿</td><td>睡很久的 task 醒來後變成 CPU-bound，帶著滿分 bonus 餓死別人</td></tr>
+            <tr><td><code>interactive_credit</code></td><td><code>sleep_avg</code> 加到滿一次記 +1，扣到 0 一次記 −1。credit 高的跑時扣得少，credit 低的一次睡眠最多只算一個時間片</td><td>偶爾睡一下的 CPU-bound task 拿到 bonus；真正的 interactive task 一忙起來就掉出去</td></tr>
+            <tr><td><code>activated = -1</code></td><td>從 uninterruptible sleep（多半是等磁碟）醒來的，<code>sleep_avg</code> 最多加到 <code>JUST_INTERACTIVE_SLEEP</code></td><td>註解寫的 “likely to be cpu hogs waiting on I/O”</td></tr>
+            <tr><td><code>ON_RUNQUEUE_WEIGHT</code></td><td>醒來後在 runqueue 上等的時間也算睡眠；被中斷叫醒的全算，被其他 task 叫醒的只算 30%</td><td>醒來後等太久的 interactive task 被扣分</td></tr>
+            <tr><td><code>TIMESLICE_GRANULARITY</code></td><td>interactive task 的時間片切成小段，同一級的輪流</td><td>兩個 interactive task 同一級時，一個占住 100ms</td></tr>
+            <tr><td><code>EXPIRED_STARVING</code></td><td>下一輪等太久，就取消 interactive 的優待</td><td>interactive task 一直留在這一輪</td></tr>
+          </tbody>
+        </table>
+        <p>這些規則各自都說得通，但疊在一起後，很難預測一個 workload 會被歸成哪一類，而每多一條規則，也就多一種可以鑽的模式。CFS 的公告裡也點名了這件事，說 CFS “is not prone to any of the 'attacks' that exist today against the heuristics of the stock scheduler”。</p>
+
+        <h2>nice 的意義不一致</h2>
+        <p>另一個問題比較少人提。時間片和 <code>static_prio</code> 是線性關係，所以「nice 差一級」在不同位置效果不同。兩個 CPU-bound 的 task，O(1) 照時間片的比例分，CFS 照權重的比例分：</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>兩個 task 的 nice</th><th>O(1) 時間片</th><th>O(1) 前者分到</th><th>CFS 權重</th><th>CFS 前者分到</th></tr></thead>
+          <tbody>
+            <tr><td>0 與 1</td><td>102 : 97</td><td>51.3%</td><td>1024 : 820</td><td>55.5%</td></tr>
+            <tr><td>18 與 19</td><td>14 : 10</td><td>58.3%</td><td>18 : 15</td><td>54.5%</td></tr>
+            <tr><td>0 與 5</td><td>102 : 78</td><td>56.7%</td><td>1024 : 335</td><td>75.3%</td></tr>
+          </tbody>
+        </table>
+        <p>O(1) 在 nice 0 附近差一級，時間片只差 5%；在 nice 19 附近，14ms 對 10ms，差了 40%。CFS 的權重表每一級都約差 1.25 倍（<a class="chref" data-ref="weight"></a>），不管從哪一級開始，差一級的效果都一樣。</p>
+
+        <h2>2007：不再猜</h2>
+        <p>2007 年 Con Kolivas 提出 RSDL（後來改名 SD，Staircase Deadline），不估計 interactivity，只靠公平的規則，桌面的反應一樣好。同年 4 月，Ingo Molnar 發表 CFS，公告裡說：</p>
+        <blockquote>Thus the CFS scheduler has no notion of 'timeslices' and has no heuristics whatsoever.</blockquote>
+        <p>他也說 CFS “has no 'array switch' artifacts (by which both the vanilla scheduler and RSDL/SD are affected)”，並把方向歸功給 Kolivas：“he has proven via RSDL/SD that 'fair scheduling' is possible and that it results in better desktop scheduling. Kudos Con!”</p>
+        <p>CFS 在 2.6.23（2007 年 10 月）合併，<code>sleep_avg</code>、bonus 和兩輪都不見了。它改用<a class="chref" data-ref="lag"></a>的思路：照權重分配，記錄每個 task 跑了多少。interactive task 睡覺時沒有在跑，自然會落後，醒來就自然會被選中，不用猜。下一章看這件事怎麼寫成 vruntime，以及這個「自然」為什麼也需要一道上限。不過，<a class="chref" data-ref="why"></a>會看到，CFS 後來也慢慢長出自己的 heuristics。</p>
+
+        <details class="deep">
+          <summary>原始出處</summary>
+          <ul class="refs">
+            <li><a href="https://lwn.net/Articles/230501/" target="_blank" rel="noopener">[Announce] [patch] Modular Scheduler Core and Completely Fair Scheduler [CFS]</a>（Ingo Molnar，2007-04-13，LWN 存的 LKML 原信）</li>
+            <li><a href="https://lwn.net/Articles/230574/" target="_blank" rel="noopener">LWN: Schedulers: the plot thickens</a>（2007-04-17）</li>
+            <li><a href="https://elixir.bootlin.com/linux/v2.6.0/source/kernel/sched.c" target="_blank" rel="noopener">2.6.0 <code>kernel/sched.c</code></a>：<code>recalc_task_prio()</code>、<code>scheduler_tick()</code>、<code>schedule()</code> 與檔案開頭的巨集</li>
+          </ul>
         </details>
       </article>
 
       <article class="card explain chapter" data-ch="cfs" data-title="CFS：讓 vruntime 齊頭並進" data-q="只記一個數字，能不能做到公平？">
-        <p>CFS 的想法是替每個 task 記錄一個 virtual runtime（<code>vruntime</code>，以下記為 <span class="tex">v_i</span>）。task 每執行 <span class="tex">\Delta t</span>，<code>update_curr()</code> 就把它的 vruntime 加上</p>
+        <p>上一章的結論是：猜誰是 interactive，就會被騙。CFS 乾脆不猜，只量每個 task 跑了多少。它的做法是替每個 task 記錄一個 virtual runtime（<code>vruntime</code>，以下記為 <span class="tex">v_i</span>）。task 每執行 <span class="tex">\Delta t</span>，<code>update_curr()</code> 就把它的 vruntime 加上</p>
         <div class="tex-block">\Delta v_i = \Delta t \times \frac{1024}{w_i}</div>
         <p>也就是實際執行時間除以「權重是 nice 0 的幾倍」（<span class="tex">w_i / 1024</span>）。同樣執行 1ms：</p>
         <table class="mini eq-ex">
@@ -220,7 +354,7 @@
         <div class="tex-block">\text{pick} = \mathop{\arg\min}_{i} \; v_i</div>
         <p>權重小的 task 執行一下 vruntime 就跑到前面去，得等其他 task 追上來才會再輪到它。長期下來每個 task 的 vruntime 會彼此貼近，而 vruntime 相等正好就是公平。從 0 開始累計時 <span class="tex">v_i = t_i \times 1024 / w_i</span>（<span class="tex">t_i</span> 是實際執行時間），所以</p>
         <div class="tex-block">v_A = v_B \;\Longrightarrow\; \frac{1024\, t_A}{w_A} = \frac{1024\, t_B}{w_B} \;\Longrightarrow\; \frac{t_A}{t_B} = \frac{w_A}{w_B}</div>
-        <p>執行時間的比例等於權重的比例，也就是第 2 章的 <span class="tex">\text{share}_i = w_i / W</span>。下圖的 A、B 是 nice 0，C 是 nice 5，照公式 C 應得 <span class="tex">335 / (1024 + 1024 + 335) \approx 14.1\%</span>。</p>
+        <p>執行時間的比例等於權重的比例，也就是<a class="chref" data-ref="weight"></a>的 <span class="tex">\text{share}_i = w_i / W</span>。下圖的 A、B 是 nice 0，C 是 nice 5，照公式 C 應得 <span class="tex">335 / (1024 + 1024 + 335) \approx 14.1\%</span>。</p>
         <div class="widget" id="w-cfs"></div>
         <p class="try">按幾次「跑 20ms」，觀察 nice 5 的 C 分到多少；接著讓 A 進入 sleep，跑個 60ms 後再喚醒它，看看它的 vruntime 被放在哪裡，以及醒來後連續執行了多久。</p>
 
@@ -247,9 +381,9 @@
             <li>SJF（Shortest Job First）：短工作源源不絕地進來時，長工作會一直被往後排。</li>
             <li>挑「被虧欠最多」的 task，但虧欠沒有上限：就是上面 vruntime 的情況。被虧欠的一方一次把帳討回來，其他 task 在這段期間被餓著。</li>
           </ul>
-          <p>作業系統課本上的典型解法是 aging：task 等得越久，優先權就逐漸提高，最後一定輪得到。以 2.6 的 O(1) 為例，interactive 的 task 用完 time slice 後可以留在優先的佇列裡繼續插隊；為了不讓其他 task 一直等，<code>EXPIRED_STARVING()</code> 會檢查被排到後面的 task 等了多久，超過 <code>STARVATION_LIMIT</code> 乘上 runqueue 上的 task 數，就取消這個優待（v2.6.12 <code>kernel/sched.c</code> 的註解寫的就是 “To guarantee that this does not starve expired tasks”）。</p>
+          <p>作業系統課本上的典型解法是 aging：task 等得越久，優先權就逐漸提高，最後一定輪得到。O(1) 的 <code>EXPIRED_STARVING()</code> 是同一類的做法（<a class="chref" data-ref="o1"></a>）：下一輪等太久，就取消 interactive task 的優待。CFS 不需要這種保險，等著的 task vruntime 不動，遲早會變成最小的；它要處理的是反方向的問題，也就是醒來的 task 落後太多。</p>
         </details>
-        <p class="fine">簡化：小圖每 1ms 重新挑選一次。實際的 CFS 會讓 task 跑完一段 <code>sched_slice()</code> 才切換，被喚醒的 task 也要落後超過一定門檻才會搶占（第 7 章）。</p>
+        <p class="fine">簡化：小圖每 1ms 重新挑選一次。實際的 CFS 會讓 task 跑完一段 <code>sched_slice()</code> 才切換，被喚醒的 task 也要落後超過一定門檻才會搶占（<a class="chref" data-ref="preempt"></a>）。</p>
       </article>
 
       <article class="card explain chapter" data-ch="why" data-title="為什麼離開 CFS" data-q="CFS 已經很公平了，為什麼還要換掉？">
@@ -259,7 +393,7 @@
         <h2>只有一個參數：權重</h2>
         <p>Peter Zijlstra 在合併進 kernel 的 EEVDF commit 裡，第一句話就是：</p>
         <blockquote>Where CFS is currently a WFQ based scheduler with only a single knob, the weight. The addition of a second, latency oriented parameter, makes something like WF2Q or EEVDF based a much better fit.</blockquote>
-        <p>回頭看第 4 章的式子，CFS 裡 task 唯一能影響的是 vruntime 前進的斜率：</p>
+        <p>回頭看<a class="chref" data-ref="cfs"></a>的式子，CFS 裡 task 唯一能影響的是 vruntime 前進的斜率：</p>
         <div class="tex-block">\Delta v_i = \Delta t \times \frac{1024}{w_i}</div>
         <p>nice 改變的是 <span class="tex">w_i</span>，也就是長期能拿到多少 CPU，而不是醒來後多快能執行。LWN 的說法是 “nice values (priorities) can be used to give a process more CPU time, but that is not the same thing.”。試想一個 audio task，它每 5ms 只需要一點點 CPU，但要準時；把它的 nice 調低，它會拿到更多用不完的份額，延遲卻沒有直接的保證。EEVDF 多了第二個參數 <span class="tex">r_i</span>（request，也就是 slice），延遲由 deadline 決定，和權重分開：</p>
         <div class="tex-block">d_i = v_i + r_i \times \frac{1024}{w_i}</div>
@@ -291,14 +425,14 @@
         <p>在 EEVDF 之前，社群已經有一套讓 task 表達延遲需求的 patch：Parth Shah 加入 per-task 的 latency-nice 屬性，Vincent Guittot 加入 <code>latency_offset</code>，讓延遲敏感的 task 醒來時可以插隊。這套 patch 能用，但做法是在 CFS 旁邊再維護一棵依延遲排序的樹。Zijlstra 的回應是：</p>
         <blockquote>Ever since looking at the latency-nice patches, I've wondered if EEVDF would not make more sense</blockquote>
         <p>他在同一封信裡也直說 “I really dislike the dual tree”，不喜歡為了延遲另外維護一棵樹。</p>
-        <p>他的判斷是：與其在只有一個參數的 CFS 外面再加一層延遲機制，不如換成本來就有兩個參數的演算法。EEVDF 出自 1995 年 Stoica 與 Abdel-Wahab 的論文，lag 有證明過的上下界（第 3 章），搶占的規則也前後一致：tick 時看 slice 用完沒，喚醒時重新挑一次看 deadline（第 7 章），不再需要 wakeup granularity 這類門檻。</p>
+        <p>他的判斷是：與其在只有一個參數的 CFS 外面再加一層延遲機制，不如換成本來就有兩個參數的演算法。EEVDF 出自 1995 年 Stoica 與 Abdel-Wahab 的論文，lag 有證明過的上下界（<a class="chref" data-ref="lag"></a>），搶占的規則也前後一致：tick 時看 slice 用完沒，喚醒時重新挑一次看 deadline（<a class="chref" data-ref="preempt"></a>），不再需要 wakeup granularity 這類門檻。</p>
 
         <h2>代價：真正的公平讓一些 workload 變慢</h2>
         <p>換掉 heuristics 不是沒有代價。第二版 patch 原本想保留類似 sleeper bonus 的放置方式（<code>PLACE_BONUS</code>），Zijlstra 形容它是 “a mixed bag of pain”：EEVDF 照權重算，一個 100% 忙碌的 parent 和一個 50% 忙碌的 child 會分到 67% / 33%，而 CFS 的 sleeper bonus 讓它們拿到 50% / 50%。stress-futex、stress-nanosleep 這類 benchmark 原本受惠於 CFS 多送的那份 CPU，換成 EEVDF 就變慢；可是保留 bonus，又會把 task 放得太靠左，弄壞 hackbench 和 latency-nice。最後 bonus 沒有留下。</p>
-        <p>各方的測試結果也是有贏有輸。Chen Yu 量到 schbench 的 95 百分位延遲降了七、八成；IBM 的 Shrikanth Hegde 在 POWER 上量到 daytrader 的吞吐量多了 7%～9%，但「4 X Shell Scripts」少了 53%，他自己標註 “This is a concerning one.”。第三版的 cover letter 總結是 “what was found was better latency and smaller variance”。也就是說，延遲和穩定度變好了，部分仰賴 sleeper 補償的吞吐量型 workload 付了代價，這和第 8 章的取捨是同一件事。</p>
+        <p>各方的測試結果也是有贏有輸。Chen Yu 量到 schbench 的 95 百分位延遲降了七、八成；IBM 的 Shrikanth Hegde 在 POWER 上量到 daytrader 的吞吐量多了 7%～9%，但「4 X Shell Scripts」少了 53%，他自己標註 “This is a concerning one.”。第三版的 cover letter 總結是 “what was found was better latency and smaller variance”。也就是說，延遲和穩定度變好了，部分仰賴 sleeper 補償的吞吐量型 workload 付了代價，這和<a class="chref" data-ref="tradeoff"></a>的取捨是同一件事。</p>
 
         <h2>介面：從 latency-nice 到 slice</h2>
-        <p>第三版時有人反對 latency-nice 這個介面，Zijlstra 改提「直接讓 task 宣告 slice 長度」，用 <code>sched_attr::sched_runtime</code> 傳進來。v6.6 合併的是沒有這個介面的版本，所以 v6.6 裡大家的 slice 都是 0.75ms，第 6 章會看到這讓 audio 的 deadline 不會比較早。per-task slice 要到 v6.12 才進來，同時補上 <code>DELAY_DEQUEUE</code>；本站的筆記發現，少了後者，短 slice 幾乎沒有效果。</p>
+        <p>第三版時有人反對 latency-nice 這個介面，Zijlstra 改提「直接讓 task 宣告 slice 長度」，用 <code>sched_attr::sched_runtime</code> 傳進來。v6.6 合併的是沒有這個介面的版本，所以 v6.6 裡大家的 slice 都是 0.75ms，<a class="chref" data-ref="eevdf"></a>會看到這讓 audio 的 deadline 不會比較早。per-task slice 要到 v6.12 才進來，同時補上 <code>DELAY_DEQUEUE</code>；本站的筆記發現，少了後者，短 slice 幾乎沒有效果。</p>
 
         <details class="deep">
           <summary>深入：mailing list 上的時間線</summary>
@@ -350,7 +484,7 @@
         <p>換句話說，lag 決定 task 有沒有資格執行（公平），deadline 決定 eligible 的 task 之間誰先誰後（延遲）。問題是 v6.6 所有 task 的 slice 都固定為 0.75ms，CPU scheduler 無從得知誰比較急，要到 v6.12，task 才能透過 <code>sched_attr</code> 指定自己的 slice。此外，v6.6 會在 task 進入 sleep 時保存它的 lag，醒來時再還回去，因此剛執行完一段就去 sleep 的 task，醒來時多半不是 eligible，還得再等一下。</p>
         <details class="deep">
           <summary>深入：kernel 的 V 從哪裡來，和 GPS 差多少</summary>
-          <p>v6.6 <code>kernel/sched/fair.c</code> 的註解寫的就是第 3 章的定義：</p>
+          <p>v6.6 <code>kernel/sched/fair.c</code> 的註解寫的就是<a class="chref" data-ref="lag"></a>的定義：</p>
           <div class="tex-block">\text{lag}_i = S - s_i = w_i \cdot (V - v_i)</div>
           <p>這條式子可以從 lag 的定義推出來。<span class="tex">v_i</span> 是 task 的 vruntime，實際執行時間按權重換算成 nice 0 的單位，所以 <span class="tex">s_i = \frac{w_i}{1024}\, v_i</span>。GPS 這邊也定義一個虛擬時間 <span class="tex">V</span>，讓它以 <span class="tex">1024 / W</span> 的速度前進，那麼 <span class="tex">dS_i/dt = w_i / W = \frac{w_i}{1024} \cdot dV/dt</span>，也就是 <span class="tex">S_i = \frac{w_i}{1024}\, V</span>。兩式相減：</p>
           <div class="tex-block">\text{lag}_i = S_i - s_i = \frac{w_i}{1024}\,(V - v_i)</div>
@@ -361,7 +495,7 @@
       </article>
 
       <article class="card explain chapter" data-ch="preempt" data-title="什麼時候換人：preemption" data-q="醒來的 task 可以插隊嗎？">
-        <p>前面談的都是「挑誰」，另一個同樣重要的問題是「什麼時候挑」。回到第 1 章的狀態圖，task 離開 CPU 有兩種方式：自己去睡，或是被換下。只在第一種情況才重新挑選的 CPU scheduler 稱為 non-preemptive，一個不睡覺的 CPU-bound task 拿到 CPU 後就不會交出來（Windows 3.x 和 Mac OS 9 以前的 cooperative multitasking 就是這樣，一個程式卡在迴圈裡，整台電腦跟著卡住）。允許把 CPU 從正在執行的 task 手上拿走的，稱為 preemptive。</p>
+        <p>前面談的都是「挑誰」，另一個同樣重要的問題是「什麼時候挑」。回到<a class="chref" data-ref="problem"></a>的狀態圖，task 離開 CPU 有兩種方式：自己去睡，或是被換下。只在第一種情況才重新挑選的 CPU scheduler 稱為 non-preemptive，一個不睡覺的 CPU-bound task 拿到 CPU 後就不會交出來（Windows 3.x 和 Mac OS 9 以前的 cooperative multitasking 就是這樣，一個程式卡在迴圈裡，整台電腦跟著卡住）。允許把 CPU 從正在執行的 task 手上拿走的，稱為 preemptive。</p>
         <p>Linux 的 CPU scheduler 是 preemptive 的，搶占發生在兩個時機：</p>
         <table class="mini eq-ex">
           <thead><tr><th>時機</th><th>CFS v2.6.24</th><th>EEVDF v6.6</th></tr></thead>
@@ -435,7 +569,7 @@
         </ul>
         <details class="deep">
           <summary>深入：sleep 時 lag 怎麼算，為什麼 CFS 和 v6.12 的 audio 多拿</summary>
-          <p>第 3 章的 GPS 在 task sleep 時不分 CPU 給它，lag 停在睡前的值，醒來接著算；照這個算法，睡覺不會讓欠帳消失。v6.6 也是這樣做的，睡前把 lag 存進 <code>vlag</code>，醒來放回去。</p>
+          <p><a class="chref" data-ref="lag"></a>的 GPS 在 task sleep 時不分 CPU 給它，lag 停在睡前的值，醒來接著算；照這個算法，睡覺不會讓欠帳消失。v6.6 也是這樣做的，睡前把 lag 存進 <code>vlag</code>，醒來放回去。</p>
           <p>CFS 和 v6.12 在這裡和 GPS 不一樣。CFS 讓剛醒的 task 從 <code>min_vruntime − sched_latency</code> 開始，等於每次醒來都送它一段時間。v6.12 的 <code>DELAY_DEQUEUE</code> 讓 lag 為負的 task 睡著後還留在 runqueue 上，慢慢把負的 lag 還掉，醒來時 lag 大約是 0。從「睡覺時 lag 不變」的角度看，這兩種都等於把欠帳免了，所以圖上它們的 audio、editor 會一路往下。如果改成「睡覺就把負的 lag 清掉」，v6.12 看起來會是公平的。論文對帶著 lag 離開的 task 有幾種處理方式，這部分之後會再對照原文。</p>
         </details>
         <p class="fine">模擬器不計 context switch 的成本，切換是瞬間完成的，所以 CPU 比例不會因為切換變多而下降。看模擬結果時，請把 context switch 次數當作吞吐量成本的指標；CPU 比例反映的是公平，不是吞吐量。</p>

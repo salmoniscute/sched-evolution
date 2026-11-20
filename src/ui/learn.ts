@@ -26,6 +26,14 @@ export function mountLearn(): void {
   const main = chapters.filter((c) => !c.appendix);
   const n = main.length;
 
+  // 內文的章節引用寫成 <a class="chref" data-ref="章節 id">，章號在這裡填，插入新章時不用手動改
+  for (const a of document.querySelectorAll<HTMLAnchorElement>('a.chref')) {
+    const i = main.findIndex((c) => c.id === a.dataset.ref);
+    if (i < 0) throw new Error(`chref 指到不存在的章節：${a.dataset.ref}`);
+    a.href = href(a.dataset.ref!);
+    a.textContent = `第 ${i + 1} 章`;
+  }
+
   const toc = document.getElementById('learnToc')!;
   tocLinks = chapters.map((c) => {
     const li = document.createElement('li');

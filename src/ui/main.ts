@@ -13,6 +13,7 @@ import { latestAtOrBefore, latestForPid, renderDecision, type InspectCtx } from 
 import { mountLearn, showChapter } from './learn.ts';
 import { mountSourcePage } from './source.ts';
 import { mountStartWidgets } from './start.ts';
+import { mountO1Widgets } from './o1-widgets.ts';
 import { startTour, stopTour, tourDone, type TourStep } from './tour.ts';
 
 const DURATION = 2 * SEC;
@@ -821,6 +822,14 @@ function route(): void {
     const ch = showChapter(sub);
     if (ch !== sub) history.replaceState(null, '', `#/learn/${ch}`);
   } else document.title = '排程器演進模擬';
+  // #/sim/<情境 id>：從學習路線直接開某個情境
+  if (page === 'sim' && sub) {
+    if (scenarios.some((sc) => sc.id === sub) && scenarioSel.value !== sub) {
+      scenarioSel.value = sub;
+      rebuild();
+    }
+    history.replaceState(null, '', '#/sim');
+  }
   for (const el of document.querySelectorAll<HTMLElement>('.page')) el.hidden = el.id !== `page-${page}`;
   for (const a of document.querySelectorAll<HTMLAnchorElement>('nav a')) a.classList.toggle('active', a.dataset.page === page);
   for (const el of document.querySelectorAll<HTMLElement>('[data-for]')) el.hidden = el.dataset.for !== page;
@@ -837,6 +846,7 @@ const topbar = document.querySelector<HTMLElement>('.topbar')!;
 new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`)).observe(topbar);
 $('glossary').innerHTML = glossaryHtml();
 mountStartWidgets();
+mountO1Widgets();
 mountLearn();
 installTooltips();
 renderMathIn();
