@@ -193,7 +193,7 @@
           <div class="tex-block">\frac{d\,\text{lag}_i}{dt} = \frac{w_i}{W} - \frac{ds_i}{dt} = \begin{cases} \dfrac{w_i}{W} - 1 & i \text{ 在 CPU 上} \\[6pt] \dfrac{w_i}{W} & i \text{ 在排隊} \end{cases}</div>
           <p>三個 nice 0 時 <span class="tex">w_i / W = \tfrac{1}{3}</span>，跑的那個以 <span class="tex">-\tfrac{2}{3}</span> 的斜率往下，等的兩個以 <span class="tex">+\tfrac{1}{3}</span> 往上。換人執行，斜率就翻過來，所以每條線都是一段一段的折線。</p>
           <p>鋸齒的高度取決於 CPU scheduler 一次讓一個 task 連續執行多久。task 連續執行 <span class="tex">q</span>，lag 就下降 <span class="tex">q\,(1 - w_i/W)</span>：兩個 nice 0 的 hog 在 CFS v2.6.24 下 <code>sched_slice()</code> 是 10ms，但 <code>check_preempt_tick()</code> 的條件是「超過」，第 10 個 tick 剛好等於、不換人，實際跑到 11ms，所以 lag 擺到 <span class="tex">11 \times \tfrac{1}{2} = 5.5</span> ms；EEVDF 每 1ms 換一次，只擺 <span class="tex">1 \times \tfrac{1}{2} = 0.5</span> ms。EEVDF 論文證明 lag 的上下界和 request 大小有關：</p>
-          <div class="tex-block">-r_{\max} \;<\; \text{lag}_i \;<\; \max(r_{\max},\, q)</div>
+          <div class="tex-block">-r_{\max} \;&lt;\; \text{lag}_i \;&lt;\; \max(r_{\max},\, q)</div>
           <p><span class="tex">r_{\max}</span> 是最大的 request（一次要求的執行長度），<span class="tex">q</span> 是排程的時間單位。模擬裡實際的 request 被 1ms 的 tick 放大成 1ms，量到的 lag 都在 ±1ms 內。</p>
         </details>
         <details class="deep">
@@ -652,7 +652,7 @@
       <div class="tex-block">\frac{d\,\text{lag}_i}{dt} = \frac{w_i}{W} - \frac{ds_i}{dt} = \begin{cases} \dfrac{w_i}{W} - 1 & i \text{ 在 CPU 上} \\[6pt] \dfrac{w_i}{W} & i \text{ 在排隊} \end{cases}</div>
       <p>三個 nice 0 時 <span class="tex">w_i / W = \tfrac{1}{3}</span>，跑的那個以 <span class="tex">-\tfrac{2}{3}</span> 的斜率往下，等的兩個以 <span class="tex">+\tfrac{1}{3}</span> 往上。換人跑，斜率就翻過來，所以每條線都是一段一段的折線。</p>
       <p>鋸齒的高度取決於排程器一次讓一個程式連續跑多久。程式連續跑 <span class="tex">q</span>，lag 就下降 <span class="tex">q\,(1 - w_i/W)</span>：兩個 nice 0 的 hog 在 CFS v2.6.24 下 <code>sched_slice()</code> 是 10ms，但 <code>check_preempt_tick()</code> 的條件是「超過」，第 10 個 tick 剛好等於、不換人，實際跑到 11ms，所以 lag 擺到 <span class="tex">11 \times \tfrac{1}{2} = 5.5</span> ms；EEVDF 每 1ms 換一次，只擺 <span class="tex">1 \times \tfrac{1}{2} = 0.5</span> ms。EEVDF 論文證明 lag 的上下界和 request 大小有關：</p>
-      <div class="tex-block">-r_{\max} \;<\; \text{lag}_i \;<\; \max(r_{\max},\, q)</div>
+      <div class="tex-block">-r_{\max} \;&lt;\; \text{lag}_i \;&lt;\; \max(r_{\max},\, q)</div>
       <p><span class="tex">r_{\max}</span> 是最大的 request（一次要求的執行長度），<span class="tex">q</span> 是排程的時間單位。模擬裡實際的 request 被 1ms 的 tick 放大成 1ms，量到的 lag 都在 ±1ms 內。</p>
 
       <h3>加起來永遠是 0</h3>
