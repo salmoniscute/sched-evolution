@@ -1,6 +1,8 @@
 // 模擬頁的導覽：一步一步把注意力帶到某個區塊。被框起來的區塊照樣可以點，
 // 暗下來的背景只是陰影，不會擋住滑鼠。第一次進模擬頁時自動開始，之後按「導覽」重看。
 
+import { tr } from '../i18n.ts';
+
 export interface TourStep {
   /** 要框起來的元素；找不到就跳過這一步 */
   target: () => HTMLElement | null;
@@ -65,10 +67,10 @@ export function startTour(steps: TourStep[]): void {
     pop.innerHTML = `<div class="tour-head"><b>${st.title}</b><span class="tour-n">${i + 1} / ${steps.length}</span></div>
       <p>${st.body}</p>
       <div class="tour-btns">
-        <button type="button" data-t="skip" class="quiet">結束導覽</button>
+        <button type="button" data-t="skip" class="quiet">${tr('結束導覽', 'End tour')}</button>
         <span class="grow"></span>
-        ${i > 0 ? '<button type="button" data-t="prev">上一步</button>' : ''}
-        <button type="button" data-t="next" class="primary">${i === steps.length - 1 ? '開始玩' : '下一步'}</button>
+        ${i > 0 ? `<button type="button" data-t="prev">${tr('上一步', 'Back')}</button>` : ''}
+        <button type="button" data-t="next" class="primary">${i === steps.length - 1 ? tr('開始玩', 'Start exploring') : tr('下一步', 'Next')}</button>
       </div>`;
     focus.scrollIntoView({ block: 'center', behavior: 'instant' as ScrollBehavior });
     place();

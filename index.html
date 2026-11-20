@@ -9,7 +9,7 @@
   <body>
     <header class="topbar">
       <div class="topbar-main">
-        <a class="brand" href="#/intro" aria-label="排程器演進：回到首頁">
+        <a class="brand" href="#/intro" aria-label="排程器演進：回到首頁" data-en-aria="CPU scheduler evolution: home">
           <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
             <rect x="2" y="5" width="11" height="4.5" rx="1.5" class="bm1"/>
             <rect x="13" y="11.75" width="8" height="4.5" rx="1.5" class="bm2"/>
@@ -17,19 +17,20 @@
             <rect x="13" y="5" width="13" height="4.5" rx="1.5" class="bm1 faint"/>
             <rect x="2" y="11.75" width="11" height="4.5" rx="1.5" class="bm2 faint"/>
           </svg>
-          <span class="brand-text"><span class="brand-name">排程器演進</span><span class="brand-sub">Linux CPU 排程器 2.4 → 6.12</span></span>
+          <span class="brand-text"><span class="brand-name" data-en="Scheduler evolution">排程器演進</span><span class="brand-sub" data-en="Linux CPU schedulers 2.4 → 6.12">Linux CPU 排程器 2.4 → 6.12</span></span>
         </a>
         <nav>
-          <a href="#/intro" data-page="intro">介紹</a>
-          <a href="#/learn/problem" data-page="learn">學習路線</a>
-          <a href="#/sim" data-page="sim">模擬</a>
-          <a href="#/source" data-page="source">原始碼</a>
+          <a href="#/intro" data-page="intro" data-en="Intro">介紹</a>
+          <a href="#/learn/problem" data-page="learn" data-en="Learn">學習路線</a>
+          <a href="#/sim" data-page="sim" data-en="Simulate">模擬</a>
+          <a href="#/source" data-page="source" data-en="Source">原始碼</a>
         </nav>
+        <button type="button" id="langBtn" class="lang-btn" lang="en">EN</button>
       </div>
       <div class="subbar" data-for="sim">
         <div class="controls">
-          <label>情境 <select id="scenario"></select></label>
-          <label>寬度
+          <label><span data-en="Scenario">情境</span> <select id="scenario"></select></label>
+          <label><span data-en="Width">寬度</span>
             <select id="width">
               <option value="10">10 ms</option>
               <option value="20">20 ms</option>
@@ -38,13 +39,15 @@
               <option value="2000">2 s</option>
             </select>
           </label>
-          <label class="grow">起點 <input id="start" type="range" min="0" max="1950" step="1" value="100" /> <output id="startOut"></output></label>
-          <label title="每個排程器的 lag 圖用同一個縱軸，振幅可以直接比；取消後各自放大"><input id="sharedLag" type="checkbox" checked /> lag 圖共用刻度</label>
-          <button type="button" id="tourBtn" class="tour-btn">導覽</button>
-          <div class="pick" id="schedPick" role="group" aria-label="要比較的排程器"></div>
+          <label class="grow"><span data-en="Start">起點</span> <input id="start" type="range" min="0" max="1950" step="1" value="100" /> <output id="startOut"></output></label>
+          <label title="每個排程器的 lag 圖用同一個縱軸，振幅可以直接比；取消後各自放大" data-en-title="All lag charts share one vertical scale so amplitudes can be compared directly; untick to scale each one separately"><input id="sharedLag" type="checkbox" checked /> <span data-en="shared lag scale">lag 圖共用刻度</span></label>
+          <button type="button" id="tourBtn" class="tour-btn" data-en="Tour">導覽</button>
+          <div class="pick" id="schedPick" role="group" aria-label="要比較的排程器" data-en-aria="Schedulers to compare"></div>
         </div>
       </div>
     </header>
+
+    <p class="untranslated" id="untranslated" hidden>This page has not been translated into English yet and is shown in Chinese. The <a href="#/sim">Simulate</a> page is available in English. <button type="button" class="link" data-lang="zh">切換成中文</button></p>
 
     <section class="page" id="page-intro" hidden>
       <article class="card explain intro">
@@ -687,7 +690,7 @@
     <section class="page" id="page-source" hidden></section>
 
     <footer>
-      <p>模擬的簡化：單核、沒有 cgroup、沒有 HRTICK。HZ 照各版本 i386 的預設：2.4 是 100，2.6 以後是 1000。</p>
+      <p data-en="Simplifications: single core, no cgroups, no HRTICK. HZ follows each version's i386 default: 100 for 2.4, 1000 from 2.6 on.">模擬的簡化：單核、沒有 cgroup、沒有 HRTICK。HZ 照各版本 i386 的預設：2.4 是 100，2.6 以後是 1000。</p>
     </footer>
     <script type="module" src="/src/ui/main.ts"></script>
   </body>

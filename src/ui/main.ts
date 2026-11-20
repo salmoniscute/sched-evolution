@@ -6,6 +6,7 @@ import { GpsShadow, simulateGps, type ShadowSample, type ShadowTaskState } from 
 import { RunRecorder } from '../ref/recorder.ts';
 import { scenarios, type Scenario } from '../scenarios.ts';
 import { changedFlags, DEFAULT_COMPARE, defaultFlags, variants, type Flags, type SchedVariant } from '../variants.ts';
+import { gap, isEn, joinList, setLang, tr } from '../i18n.ts';
 import { installCodeChips } from './code-chips.ts';
 import { renderMathIn } from './math.ts';
 import { glossaryHtml, installTooltips, linkTermsIn, term } from './glossary.ts';
@@ -76,7 +77,7 @@ function setCompared(sc: Scenario, ids: string[] | null): void {
 function comparePicker(sc: Scenario): void {
   const box = $('schedPick');
   const sel = compared(sc).map((v) => v.id);
-  box.innerHTML = '<span class="pick-label">比較</span>';
+  box.innerHTML = `<span class="pick-label">${tr('比較', 'Compare')}</span>`;
   for (const v of variants) {
     const label = document.createElement('label');
     const input = document.createElement('input');
@@ -96,7 +97,7 @@ function comparePicker(sc: Scenario): void {
   if (compareState[sc.id] && sc.compare.join() !== sel.join()) {
     const reset = document.createElement('button');
     reset.type = 'button';
-    reset.textContent = '這個情境的建議組合';
+    reset.textContent = tr('這個情境的建議組合', 'Suggested set for this scenario');
     reset.addEventListener('click', () => {
       setCompared(sc, null);
       rebuild();
@@ -117,7 +118,7 @@ function simulate(sc: Scenario): { runs: RunData[]; gpsShare: number[] } {
     const summary = summarize(sim.run());
     const dflt = defaultFlags(def);
     const base = changed.length ? summarize(new Simulator(def.make(dflt), def.tasks(sc.tasks, dflt), { duration: DURATION, hz: def.hz }).run()) : null;
-    const label = changed.length ? `${def.title}（改過開關）` : def.title;
+    const label = changed.length ? `${def.title}${tr('（改過開關）', ' (switches changed)')}` : def.title;
     return { def, flags, changed, label, summary, base, rec, shadow, names: sc.tasks.map((t) => t.name) };
   });
   return { runs, gpsShare };
@@ -332,26 +333,35 @@ function drawLag(canvas: HTMLCanvasElement, run: RunData, view: View, max: numbe
     const lb = b.lag[k] ?? 0;
     return la + ((lb - la) * (view.cursor! - a.t)) / (b.t - a.t || 1);
   };
-  return `t = ${fmtTime(view.cursor)}　` + run.names.map((nm, k) => `${nm}: ${fmtTime(at(k))}`).join('　');
+  return `t = ${fmtTime(view.cursor)}${gap}` + run.names.map((nm, k) => `${nm}: ${fmtTime(at(k))}`).join(gap);
 }
 
 // ---------------------------------------------------------------------------
 // 表格
 
 const tipSpan = (label: string, name: string, def: string) => `<span class="term" tabindex="0" data-term="${name}" data-tip="${def}">${label}</span>`;
-const CPU_SHARE = tipSpan('CPU 比例', 'CPU 比例', '2 秒內這個程式實際在 CPU 上的時間 ÷ 2 秒。');
-const GPS_SHARE = tipSpan(
-  'GPS 比例',
-  'GPS 比例',
-  '同一組程式丟給理想的 GPS 跑 2 秒，這個程式拿到的比例，也就是公平的份。會睡覺的程式睡著時不算份，所以不等於 權重 ÷ 總權重。',
+const CPU_SHARE = tipSpan(
+  tr('CPU 比例', 'CPU share'),
+  tr('CPU 比例', 'CPU share'),
+  tr('2 秒內這個程式實際在 CPU 上的時間 ÷ 2 秒。', 'Time this task actually spent on the CPU during the 2 seconds ÷ 2 seconds.'),
 );
+const GPS_SHARE = tipSpan(
+  tr('GPS 比例', 'GPS share'),
+  tr('GPS 比例', 'GPS share'),
+  tr(
+    '同一組程式丟給理想的 GPS 跑 2 秒，這個程式拿到的比例，也就是公平的份。會睡覺的程式睡著時不算份，所以不等於 權重 ÷ 總權重。',
+    'The share this task gets when the same set of tasks runs for 2 seconds under ideal GPS, i.e. its fair share. A task that sleeps gets no share while asleep, so this is not simply weight ÷ total weight.',
+  ),
+);
+
+const times = (n: number) => tr(`${n} 次`, String(n));
 
 function metricsTable(run: RunData, gpsShare: number[]): string {
   const st = run.shadow.states;
   const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
   const lat = (x: number) => (Number.isNaN(x) ? '—' : fmtTime(x));
   // 改過開關時，在數字後面附上預設值的結果
-  const was = (now: string, base: string | undefined) => (base !== undefined && base !== now ? `${now}<span class="was">預設 ${base}</span>` : now);
+  const was = (now: string, base: string | undefined) => (base !== undefined && base !== now ? `${now}<span class="was">${tr('預設', 'default')} ${base}</span>` : now);
   const rows = run.summary.tasks
     .map((t, i) => {
       const s: ShadowTaskState | undefined = st[i];
@@ -370,10 +380,10 @@ function metricsTable(run: RunData, gpsShare: number[]): string {
     })
     .join('');
   return `<table>
-    <thead><tr><th>程式</th><th>${term('nice')}</th><th>${CPU_SHARE}</th><th>${GPS_SHARE}</th><th>${term('喚醒延遲')} 平均</th><th>${term('p99')}</th><th>相對 ${term('GPS')} 的 ${term('lag')} 範圍</th><th>${term('主動 / 被搶')}</th></tr></thead>
+    <thead><tr><th>${tr('程式', 'Task')}</th><th>${term('nice')}</th><th>${CPU_SHARE}</th><th>${GPS_SHARE}</th><th>${tr(`${term('喚醒延遲')} 平均`, `${term('wakeup latency', '喚醒延遲')}, mean`)}</th><th>${term('p99')}</th><th>${tr(`相對 ${term('GPS')} 的 ${term('lag')} 範圍`, `${term('lag')} range vs. ${term('GPS')}`)}</th><th>${term(tr('主動 / 被搶', 'voluntary / preempted'), '主動 / 被搶')}</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
-  <p class="note">2 秒內 context switch ${was(`${run.summary.nr_switches} 次`, run.base ? `${run.base.nr_switches} 次` : undefined)}</p>`;
+  <p class="note">${tr('2 秒內 context switch', 'Context switches in 2 seconds:')} ${was(times(run.summary.nr_switches), run.base ? times(run.base.nr_switches) : undefined)}</p>`;
 }
 
 function scenarioCard(sc: Scenario): string {
@@ -389,11 +399,11 @@ function scenarioCard(sc: Scenario): string {
     })
     .join('');
   const list = (xs: string[]) => `<ul>${xs.map((x) => `<li>${x}</li>`).join('')}</ul>`;
-  const names = sc.tasks.map((t, i) => `<span class="swatch" style="background:${taskColor(i)}"></span>${t.name}`).join('　');
-  return `<summary><b>${sc.title}</b>　${names}<span class="more">情境說明</span></summary>
+  const names = sc.tasks.map((t, i) => `<span class="swatch" style="background:${taskColor(i)}"></span>${t.name}`).join(gap);
+  return `<summary><b>${sc.title}</b>${gap}${names}<span class="more">${tr('情境說明', 'About this scenario')}</span></summary>
     <p class="story">${sc.story}</p>
-    <table class="roles"><thead><tr><th>程式</th><th>在做什麼</th><th>它要的是</th></tr></thead><tbody>${roles}</tbody></table>
-    <h3>看哪裡</h3>${list(sc.lookFor)}`;
+    <table class="roles"><thead><tr><th>${tr('程式', 'Task')}</th><th>${tr('在做什麼', 'What it does')}</th><th>${tr('它要的是', 'What it needs')}</th></tr></thead><tbody>${roles}</tbody></table>
+    <h3>${tr('看哪裡', 'Where to look')}</h3>${list(sc.lookFor)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -401,7 +411,7 @@ function scenarioCard(sc: Scenario): string {
 
 function fmtPt(x: number): string {
   const v = x * 100;
-  return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)} 個百分點`;
+  return `${v >= 0 ? '+' : '−'}${Math.abs(v).toFixed(2)}${tr(' 個百分點', ' pp')}`;
 }
 
 function latencyChart(sc: Scenario, runs: RunData[]): string {
@@ -414,15 +424,21 @@ function latencyChart(sc: Scenario, runs: RunData[]): string {
   max *= 1.35; // 右邊留空間放數字
   const lowP99 = runs.some((r) => idx.some((i) => r.summary.tasks[i]!.wakeupLatencyP99 < r.summary.tasks[i]!.wakeupLatencyAvg));
   const p99Note = lowP99
-    ? '<p class="note">有些 p99 比平均還小：絕大多數喚醒都不用等，只有少數幾次等很久。這幾次把平均拉高，但不到 1%，所以 p99 還落在不用等的那一群。</p>'
+    ? `<p class="note">${tr(
+        '有些 p99 比平均還小：絕大多數喚醒都不用等，只有少數幾次等很久。這幾次把平均拉高，但不到 1%，所以 p99 還落在不用等的那一群。',
+        'Some p99 values are below the mean: almost all wakeups do not wait at all and only a few wait a long time. Those few pull the mean up, but they are under 1%, so p99 still falls among the wakeups that did not wait.',
+      )}</p>`
     : '';
   for (const i of idx) {
     for (const r of runs) {
       const t = r.summary.tasks[i]!;
       const avg = (t.wakeupLatencyAvg / max) * 100;
       const p99 = (t.wakeupLatencyP99 / max) * 100;
-      const label = `平均 ${fmtTime(t.wakeupLatencyAvg)}，p99 ${fmtTime(t.wakeupLatencyP99)}，最慢 ${fmtTime(t.wakeupLatencyMax)}`;
-      rows.push(`<div class="viz-row" title="${r.label}：${t.name} ${label}">
+      const label = tr(
+        `平均 ${fmtTime(t.wakeupLatencyAvg)}，p99 ${fmtTime(t.wakeupLatencyP99)}，最慢 ${fmtTime(t.wakeupLatencyMax)}`,
+        `mean ${fmtTime(t.wakeupLatencyAvg)}, p99 ${fmtTime(t.wakeupLatencyP99)}, worst ${fmtTime(t.wakeupLatencyMax)}`,
+      );
+      rows.push(`<div class="viz-row" title="${r.label}${tr('：', ': ')}${t.name} ${label}">
         <div class="lbl">${r.label}</div>
         <div class="track">
           <div class="bar pos" style="left:0;width:max(${avg}%,2px);background:${taskColor(i)}"></div>
@@ -432,11 +448,11 @@ function latencyChart(sc: Scenario, runs: RunData[]): string {
       </div>`);
     }
   }
-  const names = idx.map((i) => `<span><span class="swatch" style="background:${taskColor(i)}"></span>${sc.tasks[i]!.name} 的平均喚醒延遲</span>`).join('');
+  const names = idx.map((i) => `<span><span class="swatch" style="background:${taskColor(i)}"></span>${tr(`${sc.tasks[i]!.name} 的平均喚醒延遲`, `${sc.tasks[i]!.name} mean wakeup latency`)}</span>`).join('');
   return `<div class="viz">
-    <div class="viz-title">延遲：醒來後等多久才輪到它</div>
-    <div class="viz-sub">${sc.latencyNote ?? `越短越好。這是 ${idx.map((i) => sc.tasks[i]!.name).join('、')} 在乎的。`}</div>
-    <div class="viz-legend">${names}<span><span class="swatch" style="background:var(--fg);width:2px"></span>p99：把每次的等待排序，第 99% 的那一次</span></div>
+    <div class="viz-title">${tr('延遲：醒來後等多久才輪到它', 'Latency: how long a task waits after waking before it runs')}</div>
+    <div class="viz-sub">${sc.latencyNote ?? tr(`越短越好。這是 ${joinList(idx.map((i) => sc.tasks[i]!.name))} 在乎的。`, `Shorter is better. This is what ${joinList(idx.map((i) => sc.tasks[i]!.name))} ${idx.length > 1 ? 'care' : 'cares'} about.`)}</div>
+    <div class="viz-legend">${names}<span><span class="swatch" style="background:var(--fg);width:2px"></span>${tr('p99：把每次的等待排序，第 99% 的那一次', 'p99: sort all waits and take the one at 99%')}</span></div>
     ${rows.join('')}${p99Note}
   </div>`;
 }
@@ -455,7 +471,7 @@ function fairnessChart(sc: Scenario, runs: RunData[], gpsShare: number[]): strin
            <div class="val" style="left:calc(50% + ${w}% + 6px)">${fmtPt(d)}</div>`
         : `<div class="bar neg" style="left:calc(50% - ${w}%);width:max(${w}%,1px);background:${taskColor(i)}"></div>
            <div class="val" style="right:calc(50% + ${w}% + 6px)">${fmtPt(d)}</div>`;
-      return `<div class="viz-row" title="${r.label}：${t.name} 實際 ${(t.share * 100).toFixed(2)}%，公平的份 ${(gpsShare[i]! * 100).toFixed(2)}%">
+      return `<div class="viz-row" title="${r.label}${tr('：', ': ')}${t.name} ${tr('實際', 'actual')} ${(t.share * 100).toFixed(2)}%${tr('，公平的份', ', fair share')} ${(gpsShare[i]! * 100).toFixed(2)}%">
         <div class="lbl sub">${t.name}</div>
         <div class="track"><div class="zero" style="left:50%"></div>${bar}</div>
       </div>`;
@@ -463,12 +479,15 @@ function fairnessChart(sc: Scenario, runs: RunData[], gpsShare: number[]): strin
     return `<div class="viz-group"><div class="viz-row"><div class="lbl">${r.label}</div><div></div></div>${rows.join('')}</div>`;
   });
   const legend = sc.tasks.map((t, i) => `<span><span class="swatch" style="background:${taskColor(i)}"></span>${t.name}</span>`).join('');
+  const hogNames = sc.tasks.filter((t) => !t.pattern.some((b) => b.sleep > 0)).map((t) => t.name);
+  const hogs = joinList(hogNames);
+  const hogCount = hogNames.length;
   return `<div class="viz">
-    <div class="viz-title">公平：實際拿到的 CPU 比例減掉公平的份（GPS）</div>
-    <div class="viz-sub">越接近中線越公平。往右是多拿，往左是少拿；某個程式多拿的，一定是從別的程式那裡拿走的。這是 ${sc.tasks
-      .filter((t) => !t.pattern.some((b) => b.sleep > 0))
-      .map((t) => t.name)
-      .join('、')} 在乎的。</div>
+    <div class="viz-title">${tr('公平：實際拿到的 CPU 比例減掉公平的份（GPS）', 'Fairness: actual CPU share minus the fair share (GPS)')}</div>
+    <div class="viz-sub">${tr(
+      `越接近中線越公平。往右是多拿，往左是少拿；某個程式多拿的，一定是從別的程式那裡拿走的。這是 ${hogs} 在乎的。`,
+      `The closer to the centre line, the fairer. Right means taking more, left means getting less; whatever one task takes extra must come from the others. This is what ${hogs} ${hogCount > 1 ? 'care' : 'cares'} about.`,
+    )}</div>
     <div class="viz-legend">${legend}</div>
     ${groups.join('')}
   </div>`;
@@ -483,13 +502,16 @@ function takeaways(sc: Scenario): string[] {
 function resultsSection(sc: Scenario): string {
   const changed = data.runs.filter((r) => r.changed.length);
   const warn = changed.length
-    ? `<p class="warn">${changed.map((r) => `${r.def.title} 關掉了 ${r.changed.join('、')}`).join('；')}。圖是改過之後的結果，「怎麼解讀」的文字寫的是預設值的結果。</p>`
+    ? tr(
+        `<p class="warn">${changed.map((r) => `${r.def.title} 關掉了 ${joinList(r.changed)}`).join('；')}。圖是改過之後的結果，「怎麼解讀」的文字寫的是預設值的結果。</p>`,
+        `<p class="warn">${changed.map((r) => `${r.def.title} has ${joinList(r.changed)} turned off`).join('; ')}. The charts show the changed results; the text under "How to read this" describes the defaults.</p>`,
+      )
     : '';
-  return `<h2>結果</h2>
-    <p class="lead">把兩種需求分開來比，數字是 2 秒模擬的總計。</p>${warn}
+  return `<h2>${tr('結果', 'Results')}</h2>
+    <p class="lead">${tr('把兩種需求分開來比，數字是 2 秒模擬的總計。', 'The two kinds of demand compared separately; numbers are totals over the 2-second simulation.')}</p>${warn}
     ${latencyChart(sc, data.runs)}
     ${fairnessChart(sc, data.runs, data.gpsShare)}
-    <details class="takeaway"><summary>怎麼解讀<span class="more">先試著關掉幾個開關，再打開</span></summary>
+    <details class="takeaway"><summary>${tr('怎麼解讀', 'How to read this')}<span class="more">${tr('先試著關掉幾個開關，再打開', 'Try turning off a few switches first, then open this')}</span></summary>
     <ul>${takeaways(sc)
       .map((x) => `<li>${x}</li>`)
       .join('')}</ul></details>`;
@@ -526,7 +548,10 @@ let charts: Chart[] = [];
 /** 目前檢視的時刻。每個排程器各自顯示這個時刻之前最近的一次決策。 */
 let sel: number | null = null;
 
-const INSPECT_HINT = '點時間軸上任何一處（例如某個程式的淺色段），看那一刻排程器為什麼這樣決定';
+const INSPECT_HINT = tr(
+  '點時間軸上任何一處（例如某個程式的淺色段），看那一刻排程器為什麼這樣決定',
+  'Click anywhere on the timeline (for example a light stretch of some task) to see why the scheduler decided as it did at that moment',
+);
 
 /** 排程器的開關列 */
 function featureBar(run: RunData, sc: Scenario): HTMLElement {
@@ -539,7 +564,7 @@ function featureBar(run: RunData, sc: Scenario): HTMLElement {
   const off = run.def.features.filter((f) => run.changed.includes(f.key));
   const notes = off.map((f) => ({ f, n: sc.featNotes.find((x) => x.variant === run.def.id && x.key === f.key) }));
   desc.innerHTML =
-    notes.map(({ f, n }) => `<p><code>${f.key}</code> 關掉：${n?.note ?? f.off}</p>`).join('') + featDelta(run, notes.map(({ n }) => n?.task ?? 0));
+    notes.map(({ f, n }) => `<p><code>${f.key}</code> ${tr('關掉：', 'off: ')}${n?.note ?? f.off}</p>`).join('') + featDelta(run, notes.map(({ n }) => n?.task ?? 0));
   desc.hidden = !off.length;
   const row = document.createElement('div');
   row.className = 'feat-row';
@@ -556,8 +581,15 @@ function featureBar(run: RunData, sc: Scenario): HTMLElement {
     const name = document.createElement('span');
     name.className = 'term';
     name.tabIndex = 0;
-    name.dataset.term = f.sim ? `${f.key}（模擬器的開關）` : `${f.key}（sched_feat）`;
-    name.dataset.tip = `開著：${f.on}　關掉：${f.off}` + (f.sim ? '　這一版 kernel 沒有 sched_feat，這是模擬器為了比較加的開關，預設開著就是 kernel 的行為。' : '');
+    name.dataset.term = f.sim ? `${f.key}${tr('（模擬器的開關）', ' (simulator switch)')}` : `${f.key}${tr('（sched_feat）', ' (sched_feat)')}`;
+    name.dataset.tip =
+      tr(`開著：${f.on}　關掉：${f.off}`, `On: ${f.on}  Off: ${f.off}`) +
+      (f.sim
+        ? tr(
+            '　這一版 kernel 沒有 sched_feat，這是模擬器為了比較加的開關，預設開著就是 kernel 的行為。',
+            '  This kernel version has no sched_feat; the simulator adds this switch for comparison, and leaving it on is the kernel\'s behaviour.',
+          )
+        : '');
     name.textContent = f.key;
     label.append(input, name);
     row.append(label);
@@ -565,7 +597,7 @@ function featureBar(run: RunData, sc: Scenario): HTMLElement {
   if (run.changed.length) {
     const reset = document.createElement('button');
     reset.type = 'button';
-    reset.textContent = '恢復預設';
+    reset.textContent = tr('恢復預設', 'Restore defaults');
     reset.addEventListener('click', () => {
       flagState.set(run.def.id, defaultFlags(run.def));
       rebuild();
@@ -580,7 +612,7 @@ function featureBar(run: RunData, sc: Scenario): HTMLElement {
 function featDelta(run: RunData, taskIdx: number[]): string {
   const base = run.base;
   if (!base) return '';
-  if (JSON.stringify(base) === JSON.stringify(run.summary)) return '<p class="delta">和預設值比，每個數字都一樣。</p>';
+  if (JSON.stringify(base) === JSON.stringify(run.summary)) return `<p class="delta">${tr('和預設值比，每個數字都一樣。', 'Every number is the same as with the defaults.')}</p>`;
   const pct = (x: number) => `${(x * 100).toFixed(2)}%`;
   const arrow = (a: string, b: string) => `${a} → <b>${b}</b>`;
   const parts: string[] = [];
@@ -588,12 +620,12 @@ function featDelta(run: RunData, taskIdx: number[]): string {
     const a = base.tasks[i]!;
     const b = run.summary.tasks[i]!;
     const xs: string[] = [];
-    if (b.wakeups) xs.push(`平均喚醒延遲 ${arrow(fmtTime(a.wakeupLatencyAvg), fmtTime(b.wakeupLatencyAvg))}`);
-    xs.push(`CPU 比例 ${arrow(pct(a.share), pct(b.share))}`);
-    parts.push(`${b.name}：${xs.join('，')}`);
+    if (b.wakeups) xs.push(`${tr('平均喚醒延遲', 'mean wakeup latency')} ${arrow(fmtTime(a.wakeupLatencyAvg), fmtTime(b.wakeupLatencyAvg))}`);
+    xs.push(`${tr('CPU 比例', 'CPU share')} ${arrow(pct(a.share), pct(b.share))}`);
+    parts.push(`${b.name}${tr('：', ': ')}${xs.join(tr('，', ', '))}`);
   }
   parts.push(`context switch ${arrow(String(base.nr_switches), String(run.summary.nr_switches))}`);
-  return `<p class="delta">預設 → 關掉之後　${parts.join('；')}</p>`;
+  return `<p class="delta">${tr('預設 → 關掉之後', 'Default → switched off')}${gap}${parts.join(tr('；', '; '))}</p>`;
 }
 
 /** 決策檢視的「排程器實際比了什麼」要不要展開；跟著使用者上次的選擇 */
@@ -605,7 +637,7 @@ function zoomHint(sc: Scenario): void {
   box.hidden = !sc.zoom;
   if (!sc.zoom) return;
   const z = sc.zoom;
-  box.innerHTML = `<span>${z.text}</span><button type="button">看 ${z.width}ms（lag 圖共用刻度）</button>`;
+  box.innerHTML = `<span>${z.text}</span><button type="button">${tr(`看 ${z.width}ms（lag 圖共用刻度）`, `View ${z.width}ms (shared lag scale)`)}</button>`;
   linkTermsIn(box.querySelector('span')!);
   box.querySelector('button')!.addEventListener('click', () => {
     widthSel.value = String(z.width);
@@ -628,19 +660,19 @@ function rebuild(): void {
   charts = data.runs.map((run) => {
     const el = document.createElement('section');
     el.className = 'panel';
-    el.innerHTML = `<h2>${run.def.title}${run.changed.length ? `<span class="badge">關掉了 ${run.changed.join('、')}</span>` : ''}</h2>
+    el.innerHTML = `<h2>${run.def.title}${run.changed.length ? `<span class="badge">${tr('關掉了', 'off:')} ${joinList(run.changed)}</span>` : ''}</h2>
       <p class="note">${run.def.note}</p>
       <div class="feat-slot"></div>
       <canvas class="timeline"></canvas>
       <div class="insp">
         <div class="insp-bar">
-          <button type="button" class="prev" aria-label="上一個決策">◀</button>
+          <button type="button" class="prev" aria-label="${tr('上一個決策', 'Previous decision')}">◀</button>
           <span class="insp-title"></span>
-          <button type="button" class="next" aria-label="下一個決策">▶</button>
+          <button type="button" class="next" aria-label="${tr('下一個決策', 'Next decision')}">▶</button>
         </div>
         <div class="insp-body"></div>
       </div>
-      <div class="chart-label">相對 GPS 的 lag（應得 − 實得）</div>
+      <div class="chart-label">${tr('相對 GPS 的 lag（應得 − 實得）', 'lag vs. GPS (entitled − received)')}</div>
       <canvas class="lag"></canvas>
       <div class="chart-label readout">&nbsp;</div>
       <div class="metrics">${metricsTable(run, data.gpsShare)}</div>`;
@@ -735,7 +767,7 @@ function select(t: number | null, from?: Chart, idx?: number): void {
       continue;
     }
     const d = renderDecision(c.ctx, c.selIdx, detailOpen);
-    c.insp.title.textContent = `${d.title}　（第 ${c.selIdx + 1} / ${events.length} 個決策）`;
+    c.insp.title.textContent = `${d.title}${gap}${tr(`（第 ${c.selIdx + 1} / ${events.length} 個決策）`, `(decision ${c.selIdx + 1} / ${events.length})`)}`;
     c.insp.body.innerHTML = d.html;
   }
   // 選到畫面外的時刻就把視窗移過去
@@ -777,36 +809,68 @@ function tourSteps(): TourStep[] {
   return [
     {
       target: () => q(0, 'canvas.timeline'),
-      title: '時間軸',
-      body: `每一列是一個程式。深色在用 CPU，淺色想跑但在排隊，空白在睡覺。紫色線是目前選中的那一刻：${first} 剛醒來。`,
+      title: tr('時間軸', 'Timeline'),
+      body: tr(
+        `每一列是一個程式。深色在用 CPU，淺色想跑但在排隊，空白在睡覺。紫色線是目前選中的那一刻：${first} 剛醒來。`,
+        `Each row is a task. Dark means using the CPU, light means waiting in the queue to run, blank means asleep. The purple line is the selected moment: ${first} has just woken up.`,
+      ),
     },
     {
       target: () => q(0, '.insp'),
-      title: '為什麼這樣決定',
-      body: '這裡用一句話說明那一刻排程器怎麼選。點時間軸任何地方就換成那一刻，點在淺色段可以看它為什麼沒搶到 CPU。◀ ▶ 逐個決策前進。',
+      title: tr('為什麼這樣決定', 'Why this decision'),
+      body: tr(
+        '這裡用一句話說明那一刻排程器怎麼選。點時間軸任何地方就換成那一刻，點在淺色段可以看它為什麼沒搶到 CPU。◀ ▶ 逐個決策前進。',
+        'One sentence on how the scheduler chose at that moment. Click anywhere on the timeline to switch to that moment; click a light stretch to see why that task did not get the CPU. ◀ ▶ step through decisions.',
+      ),
     },
     ...(panels.children.length > 1
       ? [
           {
             target: () => panel(1) ?? null,
-            title: '上下比較',
-            body: `${panels.children.length} 個排程器上下排，跑的是同一組程式，時間軸的刻度對齊。往下對同一個時刻，比比看 ${first} 在各個排程器裡排隊多久。要比較哪幾個，在上方的「比較」勾選。`,
+            title: tr('上下比較', 'Compare top to bottom'),
+            body: tr(
+              `${panels.children.length} 個排程器上下排，跑的是同一組程式，時間軸的刻度對齊。往下對同一個時刻，比比看 ${first} 在各個排程器裡排隊多久。要比較哪幾個，在上方的「比較」勾選。`,
+              `${panels.children.length} schedulers stacked top to bottom, running the same tasks with aligned timelines. Look down at the same moment and compare how long ${first} queues under each. Choose which to compare with the "Compare" checkboxes at the top.`,
+            ),
           },
         ]
       : []),
     {
       target: () => q(0, 'canvas.lag'),
-      title: 'lag 圖',
-      body: '線往上表示排程器欠這個程式，往下表示它多拿了。鋸齒是輪流跑造成的，要看的是有沒有一路往下或往上。定義在學習路線第 3 章。',
+      title: tr('lag 圖', 'lag chart'),
+      body: tr(
+        '線往上表示排程器欠這個程式，往下表示它多拿了。鋸齒是輪流跑造成的，要看的是有沒有一路往下或往上。定義在學習路線第 3 章。',
+        'Up means the scheduler owes this task; down means it has taken more than its share. The sawtooth comes from taking turns; what matters is whether a line keeps going down or up. The definition is in chapter 3 of the learning path.',
+      ),
     },
     {
       target: () => q(0, '.feats'),
-      title: '開關',
-      body: '這一版 kernel 的 sched_feat，預設全開。不知道從哪裡開始，就從這裡：關掉一個，下面會寫出在這個情境裡變成怎樣、為什麼，以及前後的數字。',
+      title: tr('開關', 'Switches'),
+      body: tr(
+        '這一版 kernel 的 sched_feat，預設全開。不知道從哪裡開始，就從這裡：關掉一個，下面會寫出在這個情境裡變成怎樣、為什麼，以及前後的數字。',
+        'This kernel version\'s sched_feat switches, all on by default. If you are not sure where to start, start here: turn one off, and below it you will see what changes in this scenario, why, and the numbers before and after.',
+      ),
     },
   ];
 }
 $('tourBtn').addEventListener('click', () => startTour(tourSteps()));
+
+// ---- 語言：index.html 的固定文字把英文寫在 data-en（文字）、data-en-title、data-en-aria 屬性
+function applyLanguage(): void {
+  const btn = $<HTMLButtonElement>('langBtn');
+  btn.textContent = isEn ? '中文' : 'EN';
+  btn.lang = isEn ? 'zh-Hant' : 'en';
+  btn.title = isEn ? '切換成中文' : 'Switch to English';
+  btn.addEventListener('click', () => setLang(isEn ? 'zh' : 'en'));
+  for (const b of document.querySelectorAll<HTMLButtonElement>('[data-lang]')) b.addEventListener('click', () => setLang(b.dataset.lang as 'zh' | 'en'));
+  if (!isEn) return;
+  document.documentElement.lang = 'en';
+  for (const el of document.querySelectorAll<HTMLElement>('[data-en]')) el.textContent = el.dataset.en!;
+  for (const el of document.querySelectorAll<HTMLElement>('[data-en-title]')) el.title = el.dataset.enTitle!;
+  for (const el of document.querySelectorAll<HTMLElement>('[data-en-aria]')) el.setAttribute('aria-label', el.dataset.enAria!);
+}
+/** 還沒翻成英文的頁面（英文模式下顯示提示） */
+const UNTRANSLATED = new Set(['intro', 'learn', 'source']);
 
 // ---- 分頁（#/intro、#/learn/<章>、#/sim、#/source）
 /** 舊網址：#/start 是舊首頁，#/basics、#/concepts 併進學習路線 */
@@ -821,7 +885,7 @@ function route(): void {
   if (page === 'learn') {
     const ch = showChapter(sub);
     if (ch !== sub) history.replaceState(null, '', `#/learn/${ch}`);
-  } else document.title = '排程器演進模擬';
+  } else document.title = tr('排程器演進模擬', 'CPU scheduler evolution');
   // #/sim/<情境 id>：從學習路線直接開某個情境
   if (page === 'sim' && sub) {
     if (scenarios.some((sc) => sc.id === sub) && scenarioSel.value !== sub) {
@@ -833,6 +897,7 @@ function route(): void {
   for (const el of document.querySelectorAll<HTMLElement>('.page')) el.hidden = el.id !== `page-${page}`;
   for (const a of document.querySelectorAll<HTMLAnchorElement>('nav a')) a.classList.toggle('active', a.dataset.page === page);
   for (const el of document.querySelectorAll<HTMLElement>('[data-for]')) el.hidden = el.dataset.for !== page;
+  $('untranslated').hidden = !(isEn && UNTRANSLATED.has(page));
   if (page === 'sim') draw(); // 隱藏時 canvas 寬度是 0，顯示後要重畫
   if (page === 'source') mountSourcePage(document.getElementById('page-source')!);
   window.scrollTo(0, 0);
@@ -844,6 +909,7 @@ window.addEventListener('hashchange', route);
 // 導覽列高度會隨頁面（模擬頁多一列控制項）和視窗寬度改變；原始碼頁的步驟列要貼在它下面
 const topbar = document.querySelector<HTMLElement>('.topbar')!;
 new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`)).observe(topbar);
+applyLanguage();
 $('glossary').innerHTML = glossaryHtml();
 mountStartWidgets();
 mountO1Widgets();
