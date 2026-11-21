@@ -114,7 +114,7 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 修正：`schedule()` 改成在 `pick_next_task()` 之後才清 `need_resched`（和 v6.6 `__schedule()` 一致）。原本先清，EEVDF 在 dequeue 途中 `update_deadline()` 再設一次，會在同一時刻多跑一次 `schedule()`。影響：v6.12 情境 4 的 context switch 2134 → 2133。
   - 發現：情境 4 裡 `RUN_TO_PARITY` 關掉幾乎沒差（2026-11-17 更正：原因不只是負 lag。關掉後 audio 搶不到的理由大多變成「cc 的 deadline 比較早」，v6.6 的 slice 一樣長，audio 的 deadline 很少比較早）；CFS 關掉 `NEW_FAIR_SLEEPERS` 後 audio 平均等 8.3ms、只拿到 2.29%。
   - 測試 `test/events.test.ts`：事件和時間軸一致、挑選符合快照（CFS 最左邊；EEVDF eligible 中 deadline 最早）、說明不退回中性敘述。
-  - 待辦：情境 2（editor）的週期剛好 10ms，喚醒會對齊 tick，違反「不對齊 tick」的原則；`scenarios.ts` 的結論數字仍是寫死的。
+  - 待辦：情境 2（editor）的週期剛好 10ms，喚醒會對齊 tick，違反「不對齊 tick」的原則。
 
 - 2026-11-17：讓網頁更適合學習。
   - 新增「從這裡開始」頁（`#/start`，預設首頁）：程式的三種狀態與排程的三種時機（附圖）、延遲 vs. 公平、nice 與權重、CFS 的 vruntime 與喚醒補償、EEVDF 的 eligible / deadline（附數線例子）、演進主線、建議閱讀順序、名詞速查。
@@ -143,7 +143,7 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 行內程式碼依種類上色，沒包 `<code>` 的 kernel 名稱自動包起來（`src/ui/code-chips.ts`）。
   - 基礎觀念頁新增：GPS 與 lag 一節、vruntime 相等 ⇒ 時間比等於權重比的推導、starvation（含 aging 與 O(1) 的 `EXPIRED_STARVING()`，已對照 v2.6.12）、preemptive 與 non-preemptive（`WAKEUP_PREEMPT`、`RUN_TO_PARITY`）、延遲與吞吐量的取捨。情境 4 加一題 `WAKEUP_PREEMPT` 的動手試。
   - 發現：情境 4 關掉 `WAKEUP_PREEMPT`，audio 平均喚醒延遲 10µs → 1.96ms，context switch 786 → 568。`RUN_TO_PARITY` 只在醒來的 task deadline 比 curr 早時才有作用，slice 相同時很少發生。
-  - 待辦：基礎觀念頁的模擬數字是寫死的，改了工作負載要重跑確認；模擬器不計 context switch 成本。
+  - 待辦：模擬器不計 context switch 成本。
 
 - 2026-11-17：整理網頁結構，減少一頁到底的長文。
   - 導覽列改成四頁：介紹、學習路線（`#/learn/<章>`）、模擬、原始碼。原「基礎觀念」和「概念：lag 與 GPS」合併成學習路線的 8 章（problem、weight、lag、cfs、why、eevdf、preempt、tradeoff）＋附錄名詞速查（`#/learn/glossary`，`article.appendix`，不編號、不在上下章串列裡），一次只顯示一章，左側章節目錄（手機上是橫向圓點列），底下上一章／下一章。章節標題與引導問題寫在 `index.html` 的 `data-title` / `data-q`，目錄與章首由 `src/ui/learn.ts` 產生。舊網址 `#/basics`、`#/concepts`、`#/start` 會導到新位置。
@@ -190,3 +190,7 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 情境 4 量到：custom slice、`PREEMPT_SHORT`、`DELAY_DEQUEUE` 缺任何一樣，audio 平均都等 620µs（= 0.21ms 負 lag ÷ 1/3）；三樣都有是 3µs。
   - 學習路線仍只有中文。`#page-concepts` 是舊頁殘留的 HTML，路由已導走，可以刪。
   - 待辦：`sched_slice()` 公式沒寫進 CFS 章；第 5 章的 ⌈b*⌉／⌊b*⌋ 可移進深入；最後缺一章總結（各代怎麼回答公平與延遲）與 sched_ext。
+
+- 2026-11-21：說明文字裡的模擬數字改由測試核對。寫成 `<span data-sim="情境 排程器 [±開關] [@時間] 指標">數字</span>`（`scenarios.ts` 用 `simIn()`，`src/sim-tag.ts`），`test/sim-claims.test.ts` 照標記重跑模擬，以字面的單位與小數位數比對（`src/sim-claims.ts`）。`index.html` 51 處、`scenarios.ts` 中英各 34 處，現有數字全部正確。
+  - 規則：學習路線或情境結論引用模擬跑出來的數字時一定要加標記；公式推導、玩具例子、外部 benchmark 的數字不加。
+  - 沒標的：比例式（45 : 33 : 21）、「約」開頭的概數、上下界（< 0.01%、±1ms）。

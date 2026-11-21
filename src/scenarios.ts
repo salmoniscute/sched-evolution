@@ -1,7 +1,8 @@
 // 比較情境（CLAUDE.md）。時間刻意不對齊 tick，避免人造的 deadline 平手。
-// story / roles / lookFor / takeaway 是給網頁顯示的說明；結論裡的數字來自 2 秒模擬，改了工作負載要重跑確認。
+// story / roles / lookFor / takeaway 是給網頁顯示的說明；結論裡的模擬數字用 simIn() 標記，由測試核對。
 import { NSEC_PER_MSEC as MS, NSEC_PER_USEC as US, type TaskSpec } from './core/types.ts';
 import { tr } from './i18n.ts';
+import { simIn } from './sim-tag.ts';
 
 export interface Role {
   /** 這個程式在做什麼 */
@@ -53,6 +54,12 @@ export interface Scenario {
   tasks: TaskSpec[];
 }
 
+// 結論裡的模擬數字用 simIn() 標記，test/sim-claims.test.ts 會重跑模擬核對
+const nLat = simIn('latency');
+const nInt = simIn('interactive');
+const nCheat = simIn('cheat');
+const nNice = simIn('nice');
+
 const hog = (name: string, nice = 0): TaskSpec => ({ name, nice, pattern: [{ run: Infinity, sleep: 0 }] });
 
 const COMPILE: Role = {
@@ -85,13 +92,13 @@ export const scenarios: Scenario[] = [
       tr('lag 圖的藍線開到 2 秒看：一路往下表示 audio 長期拿得比公平的份多，多出來的是從 cc1、cc2 那裡拿的。', 'The blue line of the lag chart over 2 seconds: if it keeps going down, audio is taking more than its fair share in the long run, and the extra comes out of cc1 and cc2.'),
     ],
     takeaway: [
-      tr('CFS v2.6.24 的延遲很好，audio 平均只等 10µs。代價是公平：audio 拿了 6.1%，公平的份是 5.5%。CFS 不知道 audio 要什麼，是靠喚醒補償剛好幫到它。', 'CFS v2.6.24 has excellent latency: audio waits only 10µs on average. The price is fairness: audio takes 6.1% against a fair share of 5.5%. CFS has no idea what audio needs; its sleeper credit just happens to help.'),
-      tr('EEVDF v6.6 很公平，三個程式都拿到 GPS 的份。但 audio 每次醒來平均要等 623µs，最久 960µs。v6.6 只有一種 slice（0.75ms），沒辦法分辨誰要的是延遲。', 'EEVDF v6.6 is fair: all three tasks get their GPS share. But audio waits 623µs on average after each wakeup, 960µs at worst. v6.6 has only one slice length (0.75ms) and cannot tell who needs latency.'),
-      tr('EEVDF v6.12 的 audio 宣告了 0.3ms 的短 slice，平均只等 3µs。它拿到自己需要的 6.2%，比公平的份多一點，cc1、cc2 各少約 0.3 個百分點。', 'In EEVDF v6.12 audio declares a short 0.3ms slice and waits only 3µs on average. It gets the 6.2% it needs, a little above its fair share; cc1 and cc2 each lose about 0.3 percentage points.'),
+      tr(`CFS v2.6.24 的延遲很好，audio 平均只等 ${nLat('cfs-v2.6.24 audio.lat', '10µs')}。代價是公平：audio 拿了 ${nLat('cfs-v2.6.24 audio.share', '6.1%')}，公平的份是 ${nLat('gps audio.share', '5.5%')}。CFS 不知道 audio 要什麼，是靠喚醒補償剛好幫到它。`, `CFS v2.6.24 has excellent latency: audio waits only ${nLat('cfs-v2.6.24 audio.lat', '10µs')} on average. The price is fairness: audio takes ${nLat('cfs-v2.6.24 audio.share', '6.1%')} against a fair share of ${nLat('gps audio.share', '5.5%')}. CFS has no idea what audio needs; its sleeper credit just happens to help.`),
+      tr(`EEVDF v6.6 很公平，三個程式都拿到 GPS 的份。但 audio 每次醒來平均要等 ${nLat('eevdf-v6.6 audio.lat', '623µs')}，最久 ${nLat('eevdf-v6.6 audio.max', '960µs')}。v6.6 只有一種 slice（0.75ms），沒辦法分辨誰要的是延遲。`, `EEVDF v6.6 is fair: all three tasks get their GPS share. But audio waits ${nLat('eevdf-v6.6 audio.lat', '623µs')} on average after each wakeup, ${nLat('eevdf-v6.6 audio.max', '960µs')} at worst. v6.6 has only one slice length (0.75ms) and cannot tell who needs latency.`),
+      tr(`EEVDF v6.12 的 audio 宣告了 0.3ms 的短 slice，平均只等 ${nLat('eevdf-v6.12-slice audio.lat', '3µs')}。它拿到自己需要的 ${nLat('eevdf-v6.12-slice audio.share', '6.2%')}，比公平的份多一點，cc1、cc2 各少約 0.3 個百分點。`, `In EEVDF v6.12 audio declares a short 0.3ms slice and waits only ${nLat('eevdf-v6.12-slice audio.lat', '3µs')} on average. It gets the ${nLat('eevdf-v6.12-slice audio.share', '6.2%')} it needs, a little above its fair share; cc1 and cc2 each lose about 0.3 percentage points.`),
       tr('v6.6 和 v6.12 的差別在於程式可以把需求告訴排程器。前面幾代都是排程器自己猜誰是互動型的。', 'The difference between v6.6 and v6.12 is that a task can tell the scheduler what it needs. Earlier generations had to guess which tasks were interactive.'),
       {
         variant: 'o1-v2.6.0',
-        text: tr('O(1) 2.6.0 從 sleep_avg 猜出 audio 是互動型，醒來大多立刻打斷 cc（平均 124µs），拿 6.0%。最久的一次等了 35ms，發生在剛開始不久：cc 剛 fork 出來時繼承了 shell 的 sleep_avg，優先權和 audio 差不多。', 'O(1) 2.6.0 guesses from sleep_avg that audio is interactive; on wakeup it usually interrupts cc at once (124µs on average) and takes 6.0%. The longest wait, 35ms, happens near the start: cc was just forked and inherited the shell\'s sleep_avg, so its priority was close to audio\'s.'),
+        text: tr(`O(1) 2.6.0 從 sleep_avg 猜出 audio 是互動型，醒來大多立刻打斷 cc（平均 ${nLat('o1-v2.6.0 audio.lat', '124µs')}），拿 ${nLat('o1-v2.6.0 audio.share', '6.0%')}。最久的一次等了 ${nLat('o1-v2.6.0 audio.max', '35ms')}，發生在剛開始不久：cc 剛 fork 出來時繼承了 shell 的 sleep_avg，優先權和 audio 差不多。`, `O(1) 2.6.0 guesses from sleep_avg that audio is interactive; on wakeup it usually interrupts cc at once (${nLat('o1-v2.6.0 audio.lat', '124µs')} on average) and takes ${nLat('o1-v2.6.0 audio.share', '6.0%')}. The longest wait, ${nLat('o1-v2.6.0 audio.max', '35ms')}, happens near the start: cc was just forked and inherited the shell's sleep_avg, so its priority was close to audio's.`),
       },
     ],
     featNotes: [
@@ -145,16 +152,16 @@ export const scenarios: Scenario[] = [
     ],
     lookFor: [tr('時間軸上 editor（藍色）醒來後排隊（淺色）多久。', 'How long the editor (blue) queues (light) after waking, in the timeline.'), tr('lag 圖的藍線開到 2 秒看長期走向。', 'The blue line of the lag chart over 2 seconds, to see the long-term trend.')],
     takeaway: [
-      tr('CFS 讓 editor 醒來馬上跑，但它拿了 12.9% 的 CPU，公平的份是 10.3%。CFS 對每個剛醒的程式都固定補償，不管它是不是真的需要。', 'CFS lets the editor run as soon as it wakes, but it takes 12.9% of the CPU against a fair share of 10.3%. CFS gives every waking task the same fixed credit, whether it really needs it or not.'),
-      tr('EEVDF v6.6 剛好給 10.3%，editor 平均要等 608µs。', 'EEVDF v6.6 gives exactly 10.3%; the editor waits 608µs on average.'),
-      tr('EEVDF v6.12 的結果和 v6.6 差不多（平均等 503µs），因為 editor 沒有要求短 slice。v6.12 不會自己去猜誰是互動型程式，要程式自己講。', 'EEVDF v6.12 gives about the same result as v6.6 (503µs on average) because the editor does not ask for a short slice. v6.12 does not guess which tasks are interactive; the task has to say so.'),
+      tr(`CFS 讓 editor 醒來馬上跑，但它拿了 ${nInt('cfs-v2.6.24 editor.share', '12.9%')} 的 CPU，公平的份是 ${nInt('gps editor.share', '10.3%')}。CFS 對每個剛醒的程式都固定補償，不管它是不是真的需要。`, `CFS lets the editor run as soon as it wakes, but it takes ${nInt('cfs-v2.6.24 editor.share', '12.9%')} of the CPU against a fair share of ${nInt('gps editor.share', '10.3%')}. CFS gives every waking task the same fixed credit, whether it really needs it or not.`),
+      tr(`EEVDF v6.6 剛好給 ${nInt('eevdf-v6.6 editor.share', '10.3%')}，editor 平均要等 ${nInt('eevdf-v6.6 editor.lat', '608µs')}。`, `EEVDF v6.6 gives exactly ${nInt('eevdf-v6.6 editor.share', '10.3%')}; the editor waits ${nInt('eevdf-v6.6 editor.lat', '608µs')} on average.`),
+      tr(`EEVDF v6.12 的結果和 v6.6 差不多（平均等 ${nInt('eevdf-v6.12-slice editor.lat', '503µs')}），因為 editor 沒有要求短 slice。v6.12 不會自己去猜誰是互動型程式，要程式自己講。`, `EEVDF v6.12 gives about the same result as v6.6 (${nInt('eevdf-v6.12-slice editor.lat', '503µs')} on average) because the editor does not ask for a short slice. v6.12 does not guess which tasks are interactive; the task has to say so.`),
       {
         variant: 'o1-v2.6.0',
-        text: tr('O(1) 2.6.0 從 sleep_avg 猜出 editor 是互動型（bonus +5，prio 115），醒來大多立刻打斷 cc，平均只等 205µs，拿 12.7% 的 CPU。最久的兩次等待（9ms、31ms）都在前 50ms：cc 剛從 shell fork 出來，繼承了 shell 的 sleep_avg，優先權和 editor 差不多，editor 搶不贏。', 'O(1) 2.6.0 guesses from sleep_avg that the editor is interactive (bonus +5, prio 115); on wakeup it usually interrupts cc at once, waits only 205µs on average and takes 12.7% of the CPU. The two longest waits (9ms and 31ms) are in the first 50ms: cc was just forked from the shell and inherited its sleep_avg, so its priority was close to the editor\'s and the editor could not win.'),
+        text: tr(`O(1) 2.6.0 從 sleep_avg 猜出 editor 是互動型（bonus +5，prio 115），醒來大多立刻打斷 cc，平均只等 ${nInt('o1-v2.6.0 editor.lat', '205µs')}，拿 ${nInt('o1-v2.6.0 editor.share', '12.7%')} 的 CPU。最久的兩次等待（9ms、${nInt('o1-v2.6.0 editor.max', '31ms')}）都在前 50ms：cc 剛從 shell fork 出來，繼承了 shell 的 sleep_avg，優先權和 editor 差不多，editor 搶不贏。`, `O(1) 2.6.0 guesses from sleep_avg that the editor is interactive (bonus +5, prio 115); on wakeup it usually interrupts cc at once, waits only ${nInt('o1-v2.6.0 editor.lat', '205µs')} on average and takes ${nInt('o1-v2.6.0 editor.share', '12.7%')} of the CPU. The two longest waits (9ms and ${nInt('o1-v2.6.0 editor.max', '31ms')}) are in the first 50ms: cc was just forked from the shell and inherited its sleep_avg, so its priority was close to the editor's and the editor could not win.`),
       },
       {
         variant: 'on-v2.4.0',
-        text: tr('O(n) 2.4 的 editor 平均等 546µs，p99 卻是 50ms。這兩次長等待都在剛開始：editor 的 counter 只比 cc 多 1，goodness 沒有高出 2，搶不了，只能等 cc 用完剩下的時間片。之後 editor 每次睡著遇到重算，沒用完的 counter 都保留一半，醒來就能插隊。', 'In O(n) 2.4 the editor waits 546µs on average, but p99 is 50ms. Both long waits are at the very start: the editor\'s counter is only 1 higher than cc\'s, so its goodness is not 2 higher and it cannot preempt; it has to wait for cc to use up the rest of its time slice. Afterwards, every time the editor is asleep during a recalculation it keeps half of its unused counter, so it can preempt when it wakes.'),
+        text: tr(`O(n) 2.4 的 editor 平均等 ${nInt('on-v2.4.0 editor.lat', '546µs')}，p99 卻是 ${nInt('on-v2.4.0 editor.p99', '50ms')}。這兩次長等待都在剛開始：editor 的 counter 只比 cc 多 1，goodness 沒有高出 2，搶不了，只能等 cc 用完剩下的時間片。之後 editor 每次睡著遇到重算，沒用完的 counter 都保留一半，醒來就能插隊。`, `In O(n) 2.4 the editor waits ${nInt('on-v2.4.0 editor.lat', '546µs')} on average, but p99 is ${nInt('on-v2.4.0 editor.p99', '50ms')}. Both long waits are at the very start: the editor's counter is only 1 higher than cc's, so its goodness is not 2 higher and it cannot preempt; it has to wait for cc to use up the rest of its time slice. Afterwards, every time the editor is asleep during a recalculation it keeps half of its unused counter, so it can preempt when it wakes.`),
       },
     ],
     featNotes: [
@@ -216,7 +223,7 @@ export const scenarios: Scenario[] = [
     takeaway: [
       {
         variant: 'o1-v2.6.0',
-        text: tr('O(1) 把 cheat 當成互動型。cheat 每睡 0.83ms，sleep_avg 就加上這段睡眠的好幾倍（recalc_task_prio() 乘上 10 − 目前的 bonus，bonus 越低乘得越多）；跑的 2.3ms 則照實扣掉。兩邊在 bonus +2、+3（prio 117–118）附近打平，剛好過了 nice 0 互動型的門檻（bonus ≥ +2）。於是它醒來就能打斷 cc，時間片用完又不用等下一輪，2 秒下來拿走 67% 的 CPU，公平的份只有 29.8%。', 'O(1) treats cheat as interactive. Every 0.83ms cheat sleeps adds several times that amount to sleep_avg (recalc_task_prio() multiplies by 10 − the current bonus level, so the lower the bonus, the bigger the multiplier), while its 2.3ms of running is subtracted one for one. The two balance around bonus +2 to +3 (prio 117–118), just past the interactive threshold for nice 0 (bonus ≥ +2). So it interrupts cc whenever it wakes, and when its time slice runs out it does not have to wait for the next round. Over 2 seconds it takes 67% of the CPU, where its fair share is 29.8%.'),
+        text: tr(`O(1) 把 cheat 當成互動型。cheat 每睡 0.83ms，sleep_avg 就加上這段睡眠的好幾倍（recalc_task_prio() 乘上 10 − 目前的 bonus，bonus 越低乘得越多）；跑的 2.3ms 則照實扣掉。兩邊在 bonus +2、+3（prio 117–118）附近打平，剛好過了 nice 0 互動型的門檻（bonus ≥ +2）。於是它醒來就能打斷 cc，時間片用完又不用等下一輪，2 秒下來拿走 ${nCheat('o1-v2.6.0 cheat.share', '67%')} 的 CPU，公平的份只有 ${nCheat('gps cheat.share', '29.8%')}。`, `O(1) treats cheat as interactive. Every 0.83ms cheat sleeps adds several times that amount to sleep_avg (recalc_task_prio() multiplies by 10 − the current bonus level, so the lower the bonus, the bigger the multiplier), while its 2.3ms of running is subtracted one for one. The two balance around bonus +2 to +3 (prio 117–118), just past the interactive threshold for nice 0 (bonus ≥ +2). So it interrupts cc whenever it wakes, and when its time slice runs out it does not have to wait for the next round. Over 2 seconds it takes ${nCheat('o1-v2.6.0 cheat.share', '67%')} of the CPU, where its fair share is ${nCheat('gps cheat.share', '29.8%')}.`),
       },
       {
         variant: 'o1-v2.6.0',
@@ -224,13 +231,13 @@ export const scenarios: Scenario[] = [
       },
       {
         variant: 'on-v2.4.0',
-        text: tr('O(n) 2.4 反而虧待 cheat，只給它 12%。cheat 醒來時 counter 比 cc 多（睡著時遇到重算，沒用完的保留一半），確實能插隊；但它每跑 2.3ms 就會碰到 tick 扣 counter，幾輪就扣完了。counter 是 0 的 task goodness 也是 0，要等兩個 cc 也把各自 60ms 的時間片用完、一起重算，才能再跑。', 'O(n) 2.4 actually shortchanges cheat, giving it only 12%. When cheat wakes, its counter is higher than cc\'s (it was asleep during a recalculation and kept half of what it had left), so it can preempt; but every 2.3ms of running it hits a tick that decrements its counter, and a few rounds use it up. A task with counter 0 has goodness 0 and has to wait until both cc tasks have used up their 60ms slices and everyone is recalculated together.'),
+        text: tr(`O(n) 2.4 反而虧待 cheat，只給它 ${nCheat('on-v2.4.0 cheat.share', '12%')}。cheat 醒來時 counter 比 cc 多（睡著時遇到重算，沒用完的保留一半），確實能插隊；但它每跑 2.3ms 就會碰到 tick 扣 counter，幾輪就扣完了。counter 是 0 的 task goodness 也是 0，要等兩個 cc 也把各自 60ms 的時間片用完、一起重算，才能再跑。`, `O(n) 2.4 actually shortchanges cheat, giving it only ${nCheat('on-v2.4.0 cheat.share', '12%')}. When cheat wakes, its counter is higher than cc's (it was asleep during a recalculation and kept half of what it had left), so it can preempt; but every 2.3ms of running it hits a tick that decrements its counter, and a few rounds use it up. A task with counter 0 has goodness 0 and has to wait until both cc tasks have used up their 60ms slices and everyone is recalculated together.`),
       },
       {
         variant: 'cfs-v2.6.24',
-        text: tr('CFS 只看 vruntime，睡過不會換來額外的 CPU：cheat 拿 32.7%，和三等分差不多。比 GPS 的份（29.8%）多一點，是因為喚醒補償讓它睡醒時保留了落後 min_vruntime 的那一小段。', 'CFS only looks at vruntime; sleeping does not earn extra CPU. cheat takes 32.7%, about a third. It is slightly above the GPS share (29.8%) because the sleeper credit lets it keep the small gap behind min_vruntime when it wakes.'),
+        text: tr(`CFS 只看 vruntime，睡過不會換來額外的 CPU：cheat 拿 ${nCheat('cfs-v2.6.24 cheat.share', '32.7%')}，和三等分差不多。比 GPS 的份（${nCheat('gps cheat.share', '29.8%')}）多一點，是因為喚醒補償讓它睡醒時保留了落後 min_vruntime 的那一小段。`, `CFS only looks at vruntime; sleeping does not earn extra CPU. cheat takes ${nCheat('cfs-v2.6.24 cheat.share', '32.7%')}, about a third. It is slightly above the GPS share (${nCheat('gps cheat.share', '29.8%')}) because the sleeper credit lets it keep the small gap behind min_vruntime when it wakes.`),
       },
-      { variant: 'eevdf-v6.6', text: tr('EEVDF v6.6 也不會被騙，cheat 拿 29.8%，和 GPS 的份相同。', 'EEVDF v6.6 is not fooled either: cheat takes 29.8%, the same as its GPS share.') },
+      { variant: 'eevdf-v6.6', text: tr(`EEVDF v6.6 也不會被騙，cheat 拿 ${nCheat('eevdf-v6.6 cheat.share', '29.8%')}，和 GPS 的份相同。`, `EEVDF v6.6 is not fooled either: cheat takes ${nCheat('eevdf-v6.6 cheat.share', '29.8%')}, the same as its GPS share.`) },
     ],
     featNotes: [
       {
@@ -273,9 +280,9 @@ export const scenarios: Scenario[] = [
     compare: ['o1-v2.6.0', 'cfs-v2.6.24', 'eevdf-v6.6'],
     story: tr('三個程式要的都是吞吐量，沒有延遲的問題，只是優先權不同。這裡只看公平：CPU 有沒有照權重比例分。', 'All three tasks want throughput; there is no latency question, only different priorities. This scenario looks only at fairness: is the CPU divided in proportion to the weights?'),
     roles: [
-      { what: tr('一直要 CPU 的程式，nice −5（權重 3121）。', 'Always wants the CPU, nice −5 (weight 3121).'), needs: tr('吞吐量。照權重比例，該拿 69.7%。', 'Throughput. By weight it should get 69.7%.') },
-      { what: tr('一直要 CPU 的程式，nice 0（權重 1024）。', 'Always wants the CPU, nice 0 (weight 1024).'), needs: tr('吞吐量。該拿 22.9%。', 'Throughput. It should get 22.9%.') },
-      { what: tr('一直要 CPU 的程式，nice 5（權重 335）。', 'Always wants the CPU, nice 5 (weight 335).'), needs: tr('吞吐量。該拿 7.5%。', 'Throughput. It should get 7.5%.') },
+      { what: tr('一直要 CPU 的程式，nice −5（權重 3121）。', 'Always wants the CPU, nice −5 (weight 3121).'), needs: tr(`吞吐量。照權重比例，該拿 ${nNice('gps nice-5.share', '69.7%')}。`, `Throughput. By weight it should get ${nNice('gps nice-5.share', '69.7%')}.`) },
+      { what: tr('一直要 CPU 的程式，nice 0（權重 1024）。', 'Always wants the CPU, nice 0 (weight 1024).'), needs: tr(`吞吐量。該拿 ${nNice('gps nice0.share', '22.9%')}。`, `Throughput. It should get ${nNice('gps nice0.share', '22.9%')}.`) },
+      { what: tr('一直要 CPU 的程式，nice 5（權重 335）。', 'Always wants the CPU, nice 5 (weight 335).'), needs: tr(`吞吐量。該拿 ${nNice('gps nice5.share', '7.5%')}。`, `Throughput. It should get ${nNice('gps nice5.share', '7.5%')}.`) },
     ],
     lookFor: [
       tr('表格的 CPU 比例和 GPS 比例：2 秒下來分得準不準。', 'The CPU share and GPS share in the table: how accurate the split is over 2 seconds.'),
