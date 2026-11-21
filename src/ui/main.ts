@@ -15,6 +15,7 @@ import { mountLearn, showChapter } from './learn.ts';
 import { mountSourcePage } from './source.ts';
 import { mountStartWidgets } from './start.ts';
 import { mountO1Widgets } from './o1-widgets.ts';
+import { mountEevdfWidgets } from './eevdf-widgets.ts';
 import { startTour, stopTour, tourDone, type TourStep } from './tour.ts';
 
 const DURATION = 2 * SEC;
@@ -913,6 +914,7 @@ applyLanguage();
 $('glossary').innerHTML = glossaryHtml();
 mountStartWidgets();
 mountO1Widgets();
+mountEevdfWidgets();
 mountLearn();
 installTooltips();
 renderMathIn();

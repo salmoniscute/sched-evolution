@@ -421,6 +421,10 @@ figure.dg figcaption { color: var(--muted); font-size: 12.5px; margin-top: 4px; 
   .w-weight { display: none; }
   .w-track { grid-column: 2 / 4; }
 }
+.w-checks label { display: flex; gap: 6px; align-items: center; font-size: 13px; margin-right: 14px; }
+.w-conds { list-style: none; margin: 6px 0 0; padding: 0; font-size: 13.5px; line-height: 1.8; }
+.w-conds .ok { color: var(--series-3); font-weight: 700; }
+.w-conds .no { color: var(--series-2); font-weight: 700; }
 .w-sliders { display: flex; flex-wrap: wrap; gap: 6px 22px; margin-bottom: 4px; }
 .w-slice { display: flex; gap: 6px; align-items: center; font-size: 13px; }
 .w-slice input { width: 120px; accent-color: var(--c); }

@@ -183,3 +183,10 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
 - 2026-11-19：英文介面第一階段。新增 `src/i18n.ts`（`tr()`、`joinList()`、`gap`、`setLang()`），模擬頁、名詞表、導覽列與頁尾改成中英並列，`test/i18n.test.ts` 檢查英文模式下沒有中文。做法與規則寫在「介面語言」一節。
   - 名詞表的 `term(label, key)` 仍用中文的鍵查（`keys` 欄位），自動標註只比對目前語言的寫法。
   - 待辦：學習路線 10 章（含小圖 `start.ts`、`o1-widgets.ts`）、介紹頁、原始碼頁（`source.ts`）的英文。
+
+- 2026-11-19：學習路線補 EEVDF 的空缺（共 11 章）。
+  - 第 8 章 EEVDF：lag → V 的換算移進主線（s_i、S_i 都換成 vruntime 單位，再由 lag 總和為 0 解出加權平均）；新增 `update_deadline()`、`place_entity()`（`vlag` 截斷在 max(2×slice, TICK)、加入時放大 (W + w_i)/W，附數字例子）兩節；論文的 lag 上下界從第 3 章移到這裡的深入區塊。第 3 章的深入不再提還沒教的 `sched_slice()`、`check_preempt_tick()`。
+  - 新增第 10 章「v6.12：讓 task 說出自己的 slice」（`data-ch="slice"`）：custom slice、`PREEMPT_SHORT`（`do_preempt_short()` 的條件）、`DELAY_DEQUEUE` + `DELAY_ZERO`，以及「睡著時還債」等於原諒負 lag 的代價。小圖 `src/ui/eevdf-widgets.ts`（`#w-v612`）：三個開關，玩具模型畫 audio 一個週期的 lag，下方數字用模擬核心現場跑情境 4。
+  - 情境 4 量到：custom slice、`PREEMPT_SHORT`、`DELAY_DEQUEUE` 缺任何一樣，audio 平均都等 620µs（= 0.21ms 負 lag ÷ 1/3）；三樣都有是 3µs。
+  - 學習路線仍只有中文。`#page-concepts` 是舊頁殘留的 HTML，路由已導走，可以刪。
+  - 待辦：`sched_slice()` 公式沒寫進 CFS 章；第 5 章的 ⌈b*⌉／⌊b*⌋ 可移進深入；最後缺一章總結（各代怎麼回答公平與延遲）與 sched_ext。

@@ -195,9 +195,7 @@
           <p>把定義對時間微分。GPS 給的速度是 <span class="tex">w_i / W</span>；真實的 CPU scheduler 給的速度不是 1 就是 0，看 task 在不在 CPU 上。所以想執行的 task，lag 的斜率只有兩種：</p>
           <div class="tex-block">\frac{d\,\text{lag}_i}{dt} = \frac{w_i}{W} - \frac{ds_i}{dt} = \begin{cases} \dfrac{w_i}{W} - 1 & i \text{ 在 CPU 上} \\[6pt] \dfrac{w_i}{W} & i \text{ 在排隊} \end{cases}</div>
           <p>三個 nice 0 時 <span class="tex">w_i / W = \tfrac{1}{3}</span>，跑的那個以 <span class="tex">-\tfrac{2}{3}</span> 的斜率往下，等的兩個以 <span class="tex">+\tfrac{1}{3}</span> 往上。換人執行，斜率就翻過來，所以每條線都是一段一段的折線。</p>
-          <p>鋸齒的高度取決於 CPU scheduler 一次讓一個 task 連續執行多久。task 連續執行 <span class="tex">q</span>，lag 就下降 <span class="tex">q\,(1 - w_i/W)</span>：兩個 nice 0 的 hog 在 CFS v2.6.24 下 <code>sched_slice()</code> 是 10ms，但 <code>check_preempt_tick()</code> 的條件是「超過」，第 10 個 tick 剛好等於、不換人，實際跑到 11ms，所以 lag 擺到 <span class="tex">11 \times \tfrac{1}{2} = 5.5</span> ms；EEVDF 每 1ms 換一次，只擺 <span class="tex">1 \times \tfrac{1}{2} = 0.5</span> ms。EEVDF 論文證明 lag 的上下界和 request 大小有關：</p>
-          <div class="tex-block">-r_{\max} \;&lt;\; \text{lag}_i \;&lt;\; \max(r_{\max},\, q)</div>
-          <p><span class="tex">r_{\max}</span> 是最大的 request（一次要求的執行長度），<span class="tex">q</span> 是排程的時間單位。模擬裡實際的 request 被 1ms 的 tick 放大成 1ms，量到的 lag 都在 ±1ms 內。</p>
+          <p>鋸齒的高度取決於 CPU scheduler 一次讓一個 task 連續執行多久。task 連續執行 <span class="tex">q</span>，lag 就下降 <span class="tex">q\,(1 - w_i/W)</span>。兩個 nice 0 的 task 輪流，每次跑 10ms，lag 一次擺 <span class="tex">10 \times \tfrac{1}{2} = 5</span> ms；每次只跑 1ms，就只擺 0.5ms。後面會看到，CFS 一次讓 task 跑一整段，EEVDF 一次只跑一個很短的 slice，兩者的鋸齒高度差了一個量級，EEVDF 的論文還證明了 lag 的上下界（<a class="chref" data-ref="eevdf"></a>）。</p>
         </details>
         <details class="deep">
           <summary>深入：為什麼所有 lag 加起來永遠是 0</summary>
@@ -435,7 +433,7 @@
         <p>各方的測試結果也是有贏有輸。Chen Yu 量到 schbench 的 95 百分位延遲降了七、八成；IBM 的 Shrikanth Hegde 在 POWER 上量到 daytrader 的吞吐量多了 7%～9%，但「4 X Shell Scripts」少了 53%，他自己標註 “This is a concerning one.”。第三版的 cover letter 總結是 “what was found was better latency and smaller variance”。也就是說，延遲和穩定度變好了，部分仰賴 sleeper 補償的吞吐量型 workload 付了代價，這和<a class="chref" data-ref="tradeoff"></a>的取捨是同一件事。</p>
 
         <h2>介面：從 latency-nice 到 slice</h2>
-        <p>第三版時有人反對 latency-nice 這個介面，Zijlstra 改提「直接讓 task 宣告 slice 長度」，用 <code>sched_attr::sched_runtime</code> 傳進來。v6.6 合併的是沒有這個介面的版本，所以 v6.6 裡大家的 slice 都是 0.75ms，<a class="chref" data-ref="eevdf"></a>會看到這讓 audio 的 deadline 不會比較早。per-task slice 要到 v6.12 才進來，同時補上 <code>DELAY_DEQUEUE</code>；本站的筆記發現，少了後者，短 slice 幾乎沒有效果。</p>
+        <p>第三版時有人反對 latency-nice 這個介面，Zijlstra 改提「直接讓 task 宣告 slice 長度」，用 <code>sched_attr::sched_runtime</code> 傳進來。v6.6 合併的是沒有這個介面的版本，所以 v6.6 裡大家的 slice 都是 0.75ms，<a class="chref" data-ref="eevdf"></a>會看到這讓 audio 的 deadline 不會比較早。per-task slice 要到 v6.12 才進來，而且光有它還不夠，要同時補上 <code>PREEMPT_SHORT</code> 和 <code>DELAY_DEQUEUE</code>，短 slice 才有效果（<a class="chref" data-ref="slice"></a>）。</p>
 
         <details class="deep">
           <summary>深入：mailing list 上的時間線</summary>
@@ -463,11 +461,21 @@
       </article>
 
       <article class="card explain chapter" data-ch="eevdf" data-title="EEVDF：先看 eligible，再比 deadline" data-q="公平和延遲，能不能分開處理？">
-        <p>CFS 用一個 vruntime 同時處理公平與延遲，但這兩者其實是不同的需求。v6.6 引入的 EEVDF 把它們拆開處理：它同樣使用 vruntime，但多了兩個量。第一個是 <span class="tex">V</span>，所有可執行 task 的 vruntime 依權重的平均（<code>avg_vruntime()</code>）：</p>
-        <div class="tex-block">V = \frac{\sum_i w_i\, v_i}{\sum_i w_i}</div>
-        <p>vruntime 落在 <span class="tex">V</span> 左邊，表示依權重計算它執行得比平均少，被虧欠了。kernel 拿 <span class="tex">V</span> 估計 lag，於是「lag ≥ 0」可以直接比 vruntime 和 <span class="tex">V</span> 判斷。這樣的 task 稱為 eligible，只有 eligible 的 task 可以被選：</p>
-        <div class="tex-block">\text{lag}_i = \frac{w_i}{1024}\,(V - v_i) \;\ge\; 0 \quad\Longleftrightarrow\quad v_i \le V</div>
-        <p>第二個是 deadline。slice 是 task 一次想連續執行的長度，deadline 等於 vruntime 加上 slice 換算成的虛擬時間，換算方式和 vruntime 相同：</p>
+        <p>CFS 用一個 vruntime 同時處理公平與延遲，但這兩者其實是不同的需求。v6.6 引入的 EEVDF 把它們拆開：公平交給 lag，延遲交給 deadline。它同樣使用 vruntime，先看 lag 怎麼從 vruntime 算出來。</p>
+        <h2>從 lag 到 V</h2>
+        <p><a class="chref" data-ref="lag"></a>的 lag 是 <span class="tex">S_i - s_i</span>，兩個量都是 CPU 時間。把它們換成和 vruntime 一樣的單位，就能直接比較。task 實際拿到的時間 <span class="tex">s_i</span> 換算之後就是 vruntime（<span class="tex">\Delta v_i = \Delta t \times 1024 / w_i</span>）：</p>
+        <div class="tex-block">s_i = \frac{w_i}{1024}\, v_i</div>
+        <p>GPS 這邊也一樣。GPS 讓每個想執行的 task 同時以 <span class="tex">w_i / W</span> 的速度拿 CPU，換算成 vruntime，大家都以同一個速度 <span class="tex">1024 / W</span> 前進。把這個共同的 vruntime 記為 <span class="tex">V</span>（虛擬時間），GPS 應給的時間就是</p>
+        <div class="tex-block">S_i = \frac{w_i}{1024}\, V</div>
+        <p>兩式相減，lag 只剩 <span class="tex">V</span> 和 <span class="tex">v_i</span> 的差：</p>
+        <div class="tex-block">\text{lag}_i = S_i - s_i = \frac{w_i}{1024}\,(V - v_i)</div>
+        <p>所以 lag 的正負只看 task 的 vruntime 落在 <span class="tex">V</span> 的哪一邊：在左邊就是被欠，在右邊就是多拿。lag ≥ 0 的 task 稱為 eligible，只有 eligible 的 task 可以被選：</p>
+        <div class="tex-block">\text{lag}_i \ge 0 \quad\Longleftrightarrow\quad v_i \le V</div>
+        <p>剩下的問題是 <span class="tex">V</span> 怎麼求。kernel 不會另外跑一個 GPS，而是利用<a class="chref" data-ref="lag"></a>推過的「所有 lag 加起來是 0」：</p>
+        <div class="tex-block">\sum_j w_j\,(V - v_j) = 0 \quad\Longrightarrow\quad V = \frac{\sum_j w_j\, v_j}{\sum_j w_j}</div>
+        <p>也就是所有 runnable task 的 vruntime 依權重的平均，由 <code>avg_vruntime()</code> 計算。</p>
+        <h2>deadline：eligible 之中誰先</h2>
+        <p>第二個量是 deadline。slice 是 task 一次想連續執行的長度，deadline 等於 vruntime 加上 slice 換算成的虛擬時間，換算方式和 vruntime 相同：</p>
         <div class="tex-block">d_i = v_i + \text{slice}_i \times \frac{1024}{w_i}</div>
         <p>挑選規則是：在 eligible 的 task 中，選 deadline 最早的。</p>
         <div class="tex-block">\text{pick} = \mathop{\arg\min}_{i \,:\, v_i \le V} \; d_i</div>
@@ -484,17 +492,47 @@
         <p>單位都是 ms。A、C 是 eligible，其中 C 的 deadline 最早，所以選 C。B 不 eligible，deadline 再早也不會被選。</p>
         <div class="widget" id="w-eevdf"></div>
         <p class="try">把 C 的 slice 拉到 0.5ms 以上，被選中的就會換成 A；把 B 的 slice 拉到最短，B 依然不能被選，因為它不 eligible。再連按幾次「跑完 slice」，會發現 slice 短的 C 輪到的次數比較多，但每次只執行一小段。</p>
-        <p>換句話說，lag 決定 task 有沒有資格執行（公平），deadline 決定 eligible 的 task 之間誰先誰後（延遲）。問題是 v6.6 所有 task 的 slice 都固定為 0.75ms，CPU scheduler 無從得知誰比較急，要到 v6.12，task 才能透過 <code>sched_attr</code> 指定自己的 slice。此外，v6.6 會在 task 進入 sleep 時保存它的 lag，醒來時再還回去，因此剛執行完一段就去 sleep 的 task，醒來時多半不是 eligible，還得再等一下。</p>
-        <details class="deep">
-          <summary>深入：kernel 的 V 從哪裡來，和 GPS 差多少</summary>
-          <p>v6.6 <code>kernel/sched/fair.c</code> 的註解寫的就是<a class="chref" data-ref="lag"></a>的定義：</p>
-          <div class="tex-block">\text{lag}_i = S - s_i = w_i \cdot (V - v_i)</div>
-          <p>這條式子可以從 lag 的定義推出來。<span class="tex">v_i</span> 是 task 的 vruntime，實際執行時間按權重換算成 nice 0 的單位，所以 <span class="tex">s_i = \frac{w_i}{1024}\, v_i</span>。GPS 這邊也定義一個虛擬時間 <span class="tex">V</span>，讓它以 <span class="tex">1024 / W</span> 的速度前進，那麼 <span class="tex">dS_i/dt = w_i / W = \frac{w_i}{1024} \cdot dV/dt</span>，也就是 <span class="tex">S_i = \frac{w_i}{1024}\, V</span>。兩式相減：</p>
-          <div class="tex-block">\text{lag}_i = S_i - s_i = \frac{w_i}{1024}\,(V - v_i)</div>
-          <p>kernel 的註解把權重當成單純的比重，沒有除以 1024，單位是「權重 × 時間」；除以 nice 0 的權重 1024 就換回時間，也就是本站圖上的單位。不管哪種單位，正負號都只看 <span class="tex">V - v_i</span>。</p>
-          <p>差別在 <span class="tex">V</span> 的算法。kernel 沒有真的跑一個 GPS，而是拿所有 vruntime 的加權平均（<code>avg_vruntime()</code>）當作 <span class="tex">V</span>。這個近似成立的理由是「lag 總和是 0」：把 <span class="tex">\sum_j w_j (V - v_j) = 0</span> 移項，解出來的 <span class="tex">V</span> 就是加權平均。但這只在 runqueue 上所有 task 的 lag 加起來剛好是 0 時才對。task 帶著不為 0 的 lag 加入或離開，總和就不再是 0，加權平均和真正的 <span class="tex">V</span> 就分開了。註解自己也寫了：只有 task 都在 lag = 0 時進出，這兩者才相等。模擬頁上的 lag 是另外照定義算的 GPS，不是 kernel 的 <code>vlag</code>，所以可以拿來檢查 kernel 的近似差多少。</p>
-        </details>
+        <p>換句話說，lag 決定 task 有沒有資格執行（公平），deadline 決定 eligible 的 task 之間誰先誰後（延遲）。</p>
         <p class="fine">簡化：三個 task 都是 nice 0，所以 V 就是 vruntime 的平均；調整 slice 時 deadline 會立刻重算，實際的 kernel 要等到下一次 request 才會更新。</p>
+        <details class="deep">
+          <summary>深入：kernel 的 V 和 GPS 的 V 什麼時候不一樣</summary>
+          <p>v6.6 <code>kernel/sched/fair.c</code> 的註解寫的是</p>
+          <div class="tex-block">\text{lag}_i = S - s_i = w_i \cdot (V - v_i)</div>
+          <p>它把權重當成單純的比重，沒有除以 1024，單位是「權重 × 時間」；除以 nice 0 的權重 1024 就換回時間，也就是本站圖上的單位。不管哪種單位，正負號都只看 <span class="tex">V - v_i</span>。</p>
+          <p>上面用加權平均求 <span class="tex">V</span>，前提是 runqueue 上所有 task 的 lag 加起來剛好是 0。task 帶著不為 0 的 lag 加入或離開，總和就不再是 0，加權平均和 GPS 真正的 <span class="tex">V</span> 就分開了。註解自己也寫了：只有 task 都在 lag = 0 時進出，這兩者才相等。模擬頁上的 lag 是另外照定義算的 GPS，不是 kernel 的 <code>vlag</code>，所以可以拿來檢查 kernel 的近似差多少。</p>
+        </details>
+
+        <h2>跑完一個 slice：<code>update_deadline()</code></h2>
+        <p>被選中的 task 一路執行，vruntime 往右走。走到 deadline 時，表示這次要求的 slice 用完了，<code>update_deadline()</code> 給它下一個 deadline，並要求重新挑選：</p>
+        <div class="tex-block">v_i \ge d_i \quad\Longrightarrow\quad d_i \leftarrow v_i + \text{slice}_i \times \frac{1024}{w_i}</div>
+        <p>一個一直有事做的 task 就這樣每 0.75ms 換一次 deadline。它的 vruntime 也同時越過 <span class="tex">V</span>，變成不 eligible，讓給其他 task。</p>
+
+        <h2>醒來放在哪裡：<code>place_entity()</code></h2>
+        <p>CFS 醒來時一律放在 <code>min_vruntime</code> − 20ms 附近（<a class="chref" data-ref="cfs"></a>），不管 task 睡前是被欠還是多拿。EEVDF 改成照帳本放：task 離開 runqueue 時，<code>update_entity_lag()</code> 記下它的 lag（<code>vlag</code>，以 vruntime 為單位）；回來時 <code>place_entity()</code> 把它放回 <span class="tex">V</span> 左邊同樣的距離，deadline 從那裡重新算起。這就是 sched_feat 裡的 <code>PLACE_LAG</code>：</p>
+        <div class="tex-block">\texttt{vlag} = V - v_i \;\;\text{（離開時）}, \qquad v_i \leftarrow V - \texttt{vlag},\quad d_i \leftarrow v_i + \text{slice}_i \times \frac{1024}{w_i} \;\;\text{（回來時）}</div>
+        <p>睡覺不會讓被欠的消失，也不會讓多拿的一筆勾銷。這裡有兩個細節。</p>
+        <p>第一，<code>vlag</code> 有上下限。nice 0、slice 0.75ms、tick 1ms 時，上限是 1.5ms：</p>
+        <div class="tex-block">\texttt{vlag} \leftarrow \operatorname{clamp}\bigl(V - v_i,\; -L,\; L\bigr), \qquad L = \max(2 \times \text{slice},\; \text{TICK}) \times \frac{1024}{w_i}</div>
+        <p>被欠再多，最多也只帶回 1.5ms。論文裡的 lag 上下界是證明出來的性質（見下面的深入），kernel 則是直接截斷，免得一個 task 帶著極端的 lag 回來。</p>
+        <p>第二，task 一加入就會拉動 <span class="tex">V</span>。<span class="tex">V</span> 是加權平均，加入一個在 <span class="tex">V</span> 左邊的 task，平均就往左移，它的 lag 跟著縮水。所以 <code>place_entity()</code> 先把 lag 放大再放：</p>
+        <div class="tex-block">v_i \leftarrow V - \texttt{vlag} \times \frac{W + w_i}{W}</div>
+        <p><span class="tex">W</span> 是加入前 runqueue 上的權重總和。舉個例子：cc1、cc2 在 runqueue 上（<span class="tex">W = 2048</span>），audio（<span class="tex">w = 1024</span>）帶著 <span class="tex">\texttt{vlag} = +0.3</span> 回來。</p>
+        <table class="mini eq-ex">
+          <thead><tr><th></th><th>放在</th><th>加入後的 <span class="tex">V'</span></th><th>audio 的 lag</th></tr></thead>
+          <tbody>
+            <tr><td>直接放</td><td><span class="tex">V - 0.3</span></td><td><span class="tex">V - \frac{1024 \times 0.3}{3072} = V - 0.1</span></td><td>0.2（縮水了）</td></tr>
+            <tr class="picked"><td>先放大</td><td><span class="tex">V - 0.3 \times \frac{3072}{2048} = V - 0.45</span></td><td><span class="tex">V - \frac{1024 \times 0.45}{3072} = V - 0.15</span></td><td>0.3（和離開時一樣）</td></tr>
+          </tbody>
+        </table>
+        <details class="deep">
+          <summary>深入：lag 最多能偏多少，論文的上下界</summary>
+          <p>EEVDF 每次讓一個 task 連續執行 slice 那麼久，lag 的鋸齒高度就由 slice 決定（<a class="chref" data-ref="lag"></a>：連續執行 <span class="tex">q</span>，lag 下降 <span class="tex">q\,(1 - w_i/W)</span>）。Stoica 與 Abdel-Wahab 的論文證明，lag 的上下界和 request 大小有關：</p>
+          <div class="tex-block">-r_{\max} \;&lt;\; \text{lag}_i \;&lt;\; \max(r_{\max},\, q)</div>
+          <p><span class="tex">r_{\max}</span> 是最大的 request（一次要求的執行長度，也就是 slice），<span class="tex">q</span> 是排程的時間單位。模擬裡 0.75ms 的 slice 會被 1ms 的 tick 放大成 1ms（tick 時才檢查有沒有用完），量到的 lag 都在 ±1ms 內，符合這個上下界。兩個 nice 0 的 hog 在 CFS v2.6.24 下一次跑一整段 <code>sched_slice()</code>（約 10ms），lag 擺到 5ms 以上；EEVDF 只擺 0.5ms 左右。</p>
+        </details>
+
+        <h2>v6.6 還做不到的事</h2>
+        <p>v6.6 所有 task 的 slice 都固定為 <code>sysctl_sched_base_slice</code>（0.75ms），deadline 拉不開，CPU scheduler 無從得知誰比較急。再加上 lag 會原樣帶回，剛執行完一段就去 sleep 的 task，醒來時多半帶著負的 lag，不 eligible，還得再等一下。這兩件事合起來，就是 v6.12 要解決的問題（<a class="chref" data-ref="slice"></a>）。</p>
       </article>
 
       <article class="card explain chapter" data-ch="preempt" data-title="什麼時候換人：preemption" data-q="醒來的 task 可以插隊嗎？">
@@ -526,7 +564,7 @@
 
         <h2>EEVDF 的 RUN_TO_PARITY</h2>
         <p>EEVDF 的喚醒搶占沒有固定門檻，而是直接問挑選規則：如果現在重新挑，<code>pick_eevdf()</code> 會不會選醒來的 task？會，就搶占。規則前後一致，但 curr 可能才跑一小段，就因為一個 deadline 更早的 task 醒來而被換下。<code>RUN_TO_PARITY</code> 的做法是：curr 被選中後，只要還 eligible，就讓它把這個 slice 跑完，期間不重新比 deadline。</p>
-        <p>在模擬頁關掉 <code>RUN_TO_PARITY</code>，結果幾乎不變（context switch 1881 → 1871，audio 的延遲完全一樣）。原因是 v6.6 每個 task 的 slice 都是 0.75ms：curr 是在 eligible 時被選中的，deadline 最多是 <span class="tex">V + 0.75</span>；醒來的 task 若 lag 不大，被放在 V 附近，deadline 也在 <span class="tex">V + 0.75</span> 附近，就算重新比，多半還是 curr 的 deadline 比較早。這層保護真正擋下的，是 slice 比 curr 短的 task，所以 v6.12 讓 task 自訂 slice 時，同時加了 <code>PREEMPT_SHORT</code>：slice 比 curr 短的 task 醒來，可以取消 curr 的這層保護。</p>
+        <p>在模擬頁關掉 <code>RUN_TO_PARITY</code>，結果幾乎不變（context switch 1881 → 1871，audio 的延遲完全一樣）。原因是 v6.6 每個 task 的 slice 都是 0.75ms：curr 是在 eligible 時被選中的，deadline 最多是 <span class="tex">V + 0.75</span>；醒來的 task 若 lag 不大，被放在 V 附近，deadline 也在 <span class="tex">V + 0.75</span> 附近，就算重新比，多半還是 curr 的 deadline 比較早。這層保護真正擋下的，是 slice 比 curr 短的 task，所以 v6.12 讓 task 自訂 slice 時，同時加了 <code>PREEMPT_SHORT</code>：slice 比 curr 短的 task 醒來，可以取消 curr 的這層保護（<a class="chref" data-ref="slice"></a>）。</p>
         <details class="deep">
           <summary>深入：用數字看 RUN_TO_PARITY 擋下了什麼</summary>
           <p>三個 nice 0，單位 ms，假設這時 <span class="tex">V = 0</span>。B 在 <span class="tex">v = -0.3</span> 被選中，slice 0.75，deadline 是 0.45。跑了 0.2ms 之後，A 醒來，睡前帶著 +0.5 的 lag，被放在 <span class="tex">v = -0.5</span>，deadline 是 0.25。</p>
@@ -540,6 +578,53 @@
           <p>A 的 deadline 比 B 早，是因為它帶著正的 lag 醒來，被放在 V 的左邊很遠。slice 一樣長的情況下，這需要 A 睡前被欠了不少，模擬裡的 audio 很少符合這個條件。</p>
         </details>
         <p class="fine">另一個名稱相近的觀念是 kernel preemption（<code>CONFIG_PREEMPT</code>）：task 正在執行 kernel 程式碼（例如 system call）的途中，能不能被換下。本站只模擬 task 之間由 CPU scheduler 決定的搶占，不涉及這一層。</p>
+      </article>
+
+      <article class="card explain chapter" data-ch="slice" data-title="v6.12：讓 task 說出自己的 slice" data-q="audio 宣告了短 slice，為什麼一開始沒有變快？">
+        <p><a class="chref" data-ref="eevdf"></a>的結尾留下兩個問題：v6.6 的 slice 大家都一樣，deadline 拉不開；剛跑完一段就去睡的 task，醒來時帶著負的 lag。v6.12（2024 年 11 月）先解決第一個：task 可以用 <code>sched_setattr()</code> 的 <code>sched_attr.sched_runtime</code> 欄位指定自己的 slice（<code>custom_slice</code>），kernel 把它限制在 0.1ms 到 100ms 之間。deadline 的公式不變，只是 <span class="tex">\text{slice}_i</span> 每個 task 可以不同：</p>
+        <div class="tex-block">d_i = v_i + \text{slice}_i \times \frac{1024}{w_i}</div>
+        <p>拿模擬頁「延遲和公平」的情境來看：audio 每 5ms 醒來，跑 0.31ms 就去睡，要求 0.3ms 的 slice；cc1、cc2 是一直有事做的編譯 task，用預設的 0.75ms。三個都是 nice 0。audio 和 cc 同樣站在 <span class="tex">V</span> 上時，audio 的 deadline 是 <span class="tex">V + 0.3</span>，cc 是 <span class="tex">V + 0.75</span>，照<a class="chref" data-ref="eevdf"></a>的挑選規則，audio 應該先跑。</p>
+        <p>可是在模擬器裡只加上 custom slice，audio 的延遲完全沒變。v6.12 同時加的另外兩樣東西缺一不可：</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>情境 4，2 秒</th><th>audio 平均喚醒延遲</th><th>p99</th><th>audio 的 CPU 比例（公平的份 5.49%）</th></tr></thead>
+          <tbody>
+            <tr><td>v6.6</td><td>623 µs</td><td>960 µs</td><td>5.49%</td></tr>
+            <tr><td>v6.12，audio 沒有要求 slice</td><td>620 µs</td><td>960 µs</td><td>5.49%</td></tr>
+            <tr><td>v6.12，slice 0.3ms，關掉 <code>PREEMPT_SHORT</code></td><td>620 µs</td><td>960 µs</td><td>5.49%</td></tr>
+            <tr><td>v6.12，slice 0.3ms，關掉 <code>DELAY_DEQUEUE</code></td><td>620 µs</td><td>960 µs</td><td>5.49%</td></tr>
+            <tr class="picked"><td>v6.12，三樣都有</td><td>3 µs</td><td>0</td><td>6.15%</td></tr>
+          </tbody>
+        </table>
+        <p>audio 醒來想立刻上 CPU，要過兩關。</p>
+
+        <h2>第一關：curr 的保護與 PREEMPT_SHORT</h2>
+        <p>audio 醒來時，CPU 上通常是某個 cc。<a class="chref" data-ref="preempt"></a>講過，<code>RUN_TO_PARITY</code> 讓 curr 把這次的 slice 跑完，中途有人醒來也不重新比 deadline。audio 的 deadline 再早，也得等 cc 跑完。</p>
+        <p><code>PREEMPT_SHORT</code> 讓 slice 比較短的 task 可以取消這層保護。<code>do_preempt_short()</code> 檢查的條件是（<span class="tex">p</span> 是醒來的 task，<span class="tex">c</span> 是 curr）：</p>
+        <div class="tex-block">\text{slice}_p < \text{slice}_c \;\;\wedge\;\; p \text{ eligible} \;\;\wedge\;\; \bigl(d_p < d_c \;\vee\; c \text{ 不 eligible}\bigr)</div>
+        <p>成立時，kernel 讓 curr 不再受 <code>RUN_TO_PARITY</code> 保護，立刻重新挑選。第一個條件說明了為什麼 audio 一定要宣告 slice：slice 和 cc 一樣是 0.75ms 的話，這條規則根本不會啟動。</p>
+
+        <h2>第二關：帶著負的 lag 醒來</h2>
+        <p>第二個條件「<span class="tex">p</span> eligible」才是真正卡住的地方。audio 每次跑 0.31ms，這段時間三個 nice 0 的 task 照 GPS 各應得三分之一，所以 audio 的 lag 下降</p>
+        <div class="tex-block">\Delta\text{lag} = -\,0.31 \times \Bigl(1 - \frac{1}{3}\Bigr) \approx -0.21\ \text{ms}</div>
+        <p>它帶著 −0.21ms 去睡。v6.6 的 <code>PLACE_LAG</code>（<a class="chref" data-ref="eevdf"></a>）把這筆帳存起來，醒來原樣放回 <span class="tex">V</span> 的右邊，audio 不 eligible，slice 再短也選不到它。它只能排隊，看著別人跑，lag 以 <span class="tex">w_i / W = 1/3</span> 的速度爬回 0：</p>
+        <div class="tex-block">t_{\text{wait}} = \frac{|\text{lag}|}{w_i / W} = \frac{0.21}{1/3} \approx 0.62\ \text{ms}</div>
+        <p>正好是表裡的 620µs。照帳本來說這不算錯：audio 剛剛確實多拿了，本來就該等別人追上來。問題出在時機。audio 一睡就是 4.73ms，別人早就追上來了，可是帳本在它睡著時凍結，這段時間沒有算進去。</p>
+        <p><code>DELAY_DEQUEUE</code> 讓帳本在睡著時繼續算。task 去睡時如果不 eligible，<code>dequeue_entity()</code> 先不把它移出 runqueue，只標記為 <code>sched_delayed</code>，讓它留在樹上繼續參與競爭。它不會真的執行，但 <span class="tex">V</span> 繼續往前，它的 lag 跟著往上爬。等到它被 <code>pick_eevdf()</code> 選中，lag 一定已經 ≥ 0，kernel 這時才真正把它移出，<code>DELAY_ZERO</code> 再把正的 lag 截成 0。<code>kernel/sched/features.h</code> 的說明是：</p>
+        <blockquote>By delaying the dequeue for non-eligible tasks, they remain in the competition and can burn off their negative lag. When they get selected they'll have positive lag by definition.</blockquote>
+        <p>audio 的 0.62ms 債，在 4.73ms 的睡眠一開始就還完了，醒來時 lag 是 0，eligible，兩關都過。勾選下面的開關，看 audio 一個週期內的 lag 怎麼走，以及醒來時卡在哪一個條件：</p>
+        <div class="widget" id="w-v612"></div>
+        <p class="try">先只開 custom slice 和 <code>PREEMPT_SHORT</code>（預設），audio 醒來時在 eligible 區域外面，要排 620µs。打開 <code>DELAY_DEQUEUE</code>，睡著後那一小段線會爬回 0，醒來就能馬上跑。再關掉 custom slice：lag 一樣是 0，卻因為 slice 不比 cc 短，照樣要等。</p>
+        <p class="fine">簡化：lag 曲線是三個 nice 0、穩定狀態下的玩具模型，「eligible 但不能插隊」時的排隊長度取自下面模擬的平均值。下面的延遲與 CPU 比例是用模擬核心跑情境 4 兩秒得到的。</p>
+
+        <h2>代價：睡著時還的債，是誰付的</h2>
+        <p>三樣都有時，audio 拿到 6.15% 的 CPU，正好是它每個週期的全部需求 <span class="tex">0.31 / (0.31 + 4.73)</span>，比公平的份 5.49% 多；多出來的來自 cc1、cc2，各少約 0.3 個百分點。</p>
+        <p>原因在於「睡著時還債」只是帳面上的。audio 留在 runqueue 上的那段時間，CPU 照樣全給 cc1、cc2 跑，它們並沒有因此多拿到什麼，只是 audio 的帳被改成了 0。用<a class="chref" data-ref="lag"></a>的 GPS（睡覺時 lag 不動）來看，audio 每個週期都被免掉約 0.21ms 的欠帳，模擬頁的 lag 圖上，它的線會一路往下。</p>
+        <p>這和 CFS 的喚醒補償（<a class="chref" data-ref="cfs"></a>）結果相近，CFS 下 audio 也拿到 6.06%，差別在規則。CFS 不管睡前的帳，醒來一律往左放一段；v6.12 只原諒負的 lag，而且是在 task 真正睡著、別人用得到 CPU 的時候才原諒。延遲靠 task 自己宣告的 slice 換到，不再靠 CPU scheduler 猜。<a class="chref" data-ref="tradeoff"></a>會把這幾種做法放在一起，看延遲、公平、切換次數之間的取捨。<a href="#/sim/latency">到模擬頁看情境 4 →</a></p>
+        <details class="deep">
+          <summary>深入：被延後的 task 還在拉 V</summary>
+          <p><code>sched_delayed</code> 的 task 仍然在樹上，它的權重也還算在 <span class="tex">W</span> 和 <span class="tex">V</span> 的加權平均裡。audio 延後離開的那 0.62ms，<span class="tex">V</span> 以 <span class="tex">1024 / 3072</span> 的速度前進，而不是只剩兩個 cc 時的 <span class="tex">1024 / 2048</span>，這正是 audio 的 lag 能以 1/3 的速度爬回 0 的原因。換句話說，它「還債」的速度，是照它仍在競爭時算的。</p>
+          <p>v6.12 還修正了 fork 的放置：v6.6 的 <code>PLACE_DEADLINE_INITIAL</code> 想讓新 task 從半個 slice 開始，卻被之後的 <code>activate_task()</code> 再放一次而蓋掉；v6.12 讓 fork 的那次放置帶上 <code>ENQUEUE_INITIAL</code>，半個 slice 才真的生效。</p>
+        </details>
       </article>
 
       <article class="card explain chapter" data-ch="tradeoff" data-title="延遲與吞吐量的取捨" data-q="切換得越勤，就越好嗎？">
@@ -568,7 +653,7 @@
         <ul>
           <li>CFS 的 cc 一次跑一整段 <code>sched_slice()</code>（約 6.7ms），切換最少；audio 靠喚醒補償插隊，延遲也很低。代價在最後一欄：audio 拿到 6.06%，比公平的份多。CFS 是用公平換到延遲和吞吐量兩邊兼顧。</li>
           <li>EEVDF v6.6 的 slice 縮成 0.75ms，切換次數是 CFS 的兩倍多，audio 卻還要等 600 多 µs，因為大家的 slice 一樣，audio 的 deadline 不會比較早。所有 task 都付了切換的成本，卻沒有換到 audio 要的延遲；好處是 audio 剛好拿到公平的份。</li>
-          <li>v6.12 讓 audio 自己宣告 0.3ms 的 slice，延遲降到幾乎為 0，切換再多一些。audio 的比例高於公平的份，原因見下面〈sleep 時 lag 怎麼算〉。</li>
+          <li>v6.12 讓 audio 自己宣告 0.3ms 的 slice，延遲降到幾乎為 0，切換再多一些。audio 的比例高於公平的份，原因在<a class="chref" data-ref="slice"></a>的最後一節，下面的深入再從 GPS 的角度看一次。</li>
         </ul>
         <details class="deep">
           <summary>深入：sleep 時 lag 怎麼算，為什麼 CFS 和 v6.12 的 audio 多拿</summary>
