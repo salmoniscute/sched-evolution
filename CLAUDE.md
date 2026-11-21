@@ -191,6 +191,6 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 學習路線仍只有中文。`#page-concepts` 是舊頁殘留的 HTML，路由已導走，可以刪。
   - 待辦：`sched_slice()` 公式沒寫進 CFS 章；第 5 章的 ⌈b*⌉／⌊b*⌋ 可移進深入；最後缺一章總結（各代怎麼回答公平與延遲）與 sched_ext。
 
-- 2026-11-21：說明文字裡的模擬數字改由測試核對。寫成 `<span data-sim="情境 排程器 [±開關] [@時間] 指標">數字</span>`（`scenarios.ts` 用 `simIn()`，`src/sim-tag.ts`），`test/sim-claims.test.ts` 照標記重跑模擬，以字面的單位與小數位數比對（`src/sim-claims.ts`）。`index.html` 51 處、`scenarios.ts` 中英各 34 處，現有數字全部正確。
+- 2026-11-21：說明文字裡的模擬數字改由測試核對。寫成 `<span data-sim="情境 排程器 [±開關] [@時間] 指標">數字</span>`（`scenarios.ts` 用 `simIn()`，`src/sim-tag.ts`），`test/sim-claims.test.ts` 照標記重跑模擬，以字面的單位與小數位數比對（`src/sim-claims.ts`）。`index.html` 51 處、`scenarios.ts` 中英各 29 處，現有數字全部正確。
   - 規則：學習路線或情境結論引用模擬跑出來的數字時一定要加標記；公式推導、玩具例子、外部 benchmark 的數字不加。
   - 沒標的：比例式（45 : 33 : 21）、「約」開頭的概數、上下界（< 0.01%、±1ms）。
