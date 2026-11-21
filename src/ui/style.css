@@ -624,3 +624,6 @@ details.deep .glossary { margin-top: 10px; }
 table.eq-ex.wrap { width: 100%; }
 table.eq-ex.wrap th, table.eq-ex.wrap td { white-space: normal; text-align: left; vertical-align: top; line-height: 1.6; }
 table.eq-ex.wrap code.ic { white-space: normal; overflow-wrap: anywhere; }
+.s4 { --c: var(--series-4); }
+.widget button.on { border-color: var(--sel); font-weight: 600; }
+table.w-cost td:not(:first-child), table.w-cost th:not(:first-child) { text-align: right; font-variant-numeric: tabular-nums; }

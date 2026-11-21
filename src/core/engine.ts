@@ -14,6 +14,7 @@ import {
   resched_task,
   Tracer,
   type Ns,
+  type OpKind,
   type Rq,
   type SchedClass,
   type Task,
@@ -91,6 +92,9 @@ export interface SimResult {
   nr_schedule: number;
   /** 排程器資料結構操作總成本（見 Rq.ops） */
   ops: number;
+  opsBy: Record<OpKind, number>;
+  /** 其中在 schedule() 裡面花的（deactivate / put_prev / pick_next，含 O(n) 的重算），不含 tick 與喚醒時的成本 */
+  schedOpsBy: Record<OpKind, number>;
   tasks: TaskStats[];
   trace: Tracer;
 }
@@ -115,6 +119,7 @@ export class Simulator<SE> {
   private idleTime = 0;
   private nr_switches = 0;
   private nr_schedule = 0;
+  private readonly schedOpsBy: Record<OpKind, number> = { pick: 0, queue: 0, recalc: 0 };
   private readonly eventObservers: SimObserver[];
   /** 下一次 schedule() 的原因（第一個設定 need_resched 的事件） */
   private cause: { kind: SchedCause; pid: number | null } | null = null;
@@ -136,6 +141,7 @@ export class Simulator<SE> {
       need_resched: false,
       trace: new Tracer(cfg.trace ?? false, cfg.traceLimit),
       ops: 0,
+      opsBy: { pick: 0, queue: 0, recalc: 0 },
     };
 
     specs.forEach((spec, i) => {
@@ -230,6 +236,8 @@ export class Simulator<SE> {
       nr_switches: this.nr_switches,
       nr_schedule: this.nr_schedule,
       ops: rq.ops,
+      opsBy: { ...rq.opsBy },
+      schedOpsBy: { ...this.schedOpsBy },
       tasks: this.tasks.map((p) => this.bk(p).stats),
       trace: rq.trace,
     };
@@ -341,6 +349,7 @@ export class Simulator<SE> {
     const { rq } = this;
     const prev = rq.curr;
     this.nr_schedule++;
+    const ops0 = { ...rq.opsBy };
     rq.trace.log(rq.clock, 'schedule', prev?.pid);
 
     const voluntary = prev !== null && prev.state === 'SLEEPING';
@@ -355,6 +364,7 @@ export class Simulator<SE> {
     const watching = this.eventObservers.length > 0;
     const before = watching ? this.sched.snapshot(rq) : null;
     const next = this.sched.pick_next_task(rq);
+    for (const k of Object.keys(ops0) as OpKind[]) this.schedOpsBy[k] += rq.opsBy[k] - ops0[k];
     // clear_tsk_need_resched(prev)：v6.6 是在 pick_next_task() 之後才清（kernel/sched/core.c 的 __schedule()）。
     // dequeue 途中 update_curr() → update_deadline() 設的 need_resched 已經由這次挑選處理掉，不能留到下一輪。
     // v2.6.24 是在 deactivate_task() 之前清，但它的 dequeue 路徑不會設 need_resched，結果相同。

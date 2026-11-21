@@ -167,7 +167,7 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 新增比較情境 3（`cheat`：跑 2.3ms 睡 0.83ms）：O(1) 給它 67%（GPS 29.8%），關掉 `TASK_INTERACTIVE` 回到 33.7%；O(n) 只給 12%；CFS 32.7%。
   - 發現：O(1) 關掉 `sleep_avg` 後，會睡覺的 task 幾乎拿不到 CPU（情境 4 audio 0.17%、平均等 189ms），active 一空就和 expired 交換，醒來排在拿了新時間片的 hog 後面。`EXPIRED_STARVING` 的門檻是 1.02s × nr_running，四個情境都用不到。
   - 發現：2.4 的 tick dodging（每 10ms 跑 9.4ms、tick 前睡著）拿到 86.5%，對齊 tick，只放在測試，沒做成情境。
-  - 待辦：比較情境 1（大量 task，O(n) 成本線性上升）還沒做，時間軸放不下幾十列，考慮改成「成本 vs task 數」的圖；原始碼頁還沒有 O(1)、O(n) 的片段；學習路線還沒有 O(n)、O(1) 的章節。
+  - 待辦：原始碼頁還沒有 O(1)、O(n) 的片段；學習路線還沒有 O(n)、O(1) 的章節。（比較情境 1 已在 2026-11-21 完成）
 
 - 2026-11-18：模擬頁的名詞改成白話帶出。O(1) 的 active / expired 一律寫成「這一輪／下一輪」（決策摘要、開關提示、排程器說明、情境文字）；CFS 的 vslice、curr、`sched_attr.sched_runtime` 等也改寫。排程器說明、開關說明、情境卡片、結論、zoom 提示、決策摘要都套上 `linkTermsIn` / `linkTerms`。名詞表新增 `EXPIRED_STARVING`、`TIMESLICE_GRANULARITY`、HZ 與 jiffies、fork。
   - 待辦：第 5 章寫了「本站的筆記發現」，和「網頁不提 repo 內部」的原則不一致。
@@ -194,3 +194,9 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
 - 2026-11-21：說明文字裡的模擬數字改由測試核對。寫成 `<span data-sim="情境 排程器 [±開關] [@時間] 指標">數字</span>`（`scenarios.ts` 用 `simIn()`，`src/sim-tag.ts`），`test/sim-claims.test.ts` 照標記重跑模擬，以字面的單位與小數位數比對（`src/sim-claims.ts`）。`index.html` 51 處、`scenarios.ts` 中英各 29 處，現有數字全部正確。
   - 規則：學習路線或情境結論引用模擬跑出來的數字時一定要加標記；公式推導、玩具例子、外部 benchmark 的數字不加。
   - 沒標的：比例式（45 : 33 : 21）、「約」開頭的概數、上下界（< 0.01%、±1ms）。
+
+- 2026-11-21：比較情境 1（大量 task）與決策成本。
+  - 成本改用 `charge(rq, kind, n)` 記（`pick` / `queue` / `recalc`），引擎另外記 `schedule()` 裡面花的部分。`opsPerSchedule` 改成只算 `schedule()` 本身：原本是總成本 ÷ `schedule()` 次數，CFS v2.6.24 的 `update_curr()` 每個 tick 都查一次 leftmost（為了 `min_vruntime`），task 少時被灌成每次 2000。總成本另有 `opsPerSec`。`RUN_TO_PARITY` 直接回傳 curr 的路徑補記 1。
+  - N 個 nice 0 hog、2 秒：2.4 每次挑選 ≈ n + 1（prev 先算一次，prev 也在 runqueue 上），重算後再掃一輪，攤提多約 1；2.6.0 恆為 1（時間片用完的搬移在 `scheduler_tick()`）；CFS 挑選 2、進出樹 ≈ 2 log n；EEVDF 挑選本身也隨 log n 成長。v6.12 和 v6.6 相同。
+  - 情境 1 不放模擬頁（時間軸放不下），做成學習路線第 4 章的小圖（`src/cost.ts` + `src/ui/cost-widget.ts`，`#w-cost`），測試 `test/cost.test.ts`。模擬頁的指標表加上每次 `schedule()` 的平均步數與拆解。
+  - 成本模型不含 cache miss 與多核 lock，網頁上已註明。

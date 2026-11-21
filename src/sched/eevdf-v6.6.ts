@@ -9,7 +9,7 @@
 // 權重：64 位元 kernel 的 se->load.weight 是 scale_load(w) = w << 10，但凡是參與計算的地方
 // 都會先 scale_load_down()，所以這裡直接存未放大的 w（nice 0 = 1024），結果相同。
 
-import { NSEC_PER_USEC, resched_task, type Ns, type Rq, type SchedClass, type Task } from '../core/types.ts';
+import { NSEC_PER_USEC, resched_task, charge, type Ns, type Rq, type SchedClass, type Task } from '../core/types.ts';
 import { Timeline } from '../core/timeline.ts';
 import { NICE_0_LOAD, set_load_weight, type LoadWeight } from '../core/weights.ts';
 
@@ -316,13 +316,13 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
   /** __enqueue_entity()（:831） */
   protected __enqueue_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
     this.avg_vruntime_add(cfs_rq, se);
-    rq.ops += cfs_rq.tasks_timeline.depth();
+    charge(rq, 'queue', cfs_rq.tasks_timeline.depth());
     cfs_rq.tasks_timeline.insert(se);
   }
 
   /** __dequeue_entity()（:839） */
   protected __dequeue_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
-    rq.ops += cfs_rq.tasks_timeline.depth();
+    charge(rq, 'queue', cfs_rq.tasks_timeline.depth());
     cfs_rq.tasks_timeline.remove(se);
     this.avg_vruntime_sub(cfs_rq, se);
   }
@@ -333,7 +333,7 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
    * kernel 用 augmented rbtree（每個節點存子樹的 min_deadline）在 O(log n) 內找到。
    * 這裡用線性掃描得到同樣的集合與最小值：樹依 vruntime 排序，而 eligible ⇔ v_i ≤ V，
    * 所以 eligible 的一定是左邊連續的一段，遇到第一個不 eligible 的就可以停。
-   * 成本仍以 rbtree 的深度計入 rq.ops。
+   * 成本仍以 rbtree 的深度計入 rq.ops（charge 'pick'）。
    *
    * 簡化：deadline 完全相同時，kernel 的結果取決於樹的形狀；這裡取最左邊的，curr 優先。
    */
@@ -345,10 +345,11 @@ export class EevdfV6_6 implements SchedClass<SchedEntity> {
     // 選中之後就一直跑到不 eligible 或拿到新 slice 為止（見 set_next_entity 的 HACK）
     if (this.tun.features.RUN_TO_PARITY && curr && curr.vlag === curr.deadline) {
       rq.trace.log(rq.clock, '__pick_eevdf', curr.task.pid, { run_to_parity: true });
+      charge(rq, 'pick', 1);
       return curr;
     }
 
-    rq.ops += Math.max(1, cfs_rq.tasks_timeline.depth());
+    charge(rq, 'pick', Math.max(1, cfs_rq.tasks_timeline.depth()));
     for (const se of cfs_rq.tasks_timeline.toArray()) {
       if (!this.entity_eligible(cfs_rq, se)) break;
       if (!best || best.deadline - se.deadline > 0) best = se;

@@ -215,6 +215,14 @@
         <p>O(1) 把 140 級優先權各放一條佇列，再用一個 140 位元的 bitmap 記錄哪幾級有 task。數字越小越優先，挑選就是找第一個非空的佇列，取它的隊首：</p>
         <div class="tex-block">p^{*} = \min\{\, p \mid \text{queue}[p] \ne \varnothing \,\}</div>
         <p>這一步由 <code>sched_find_first_bit()</code> 在 bitmap 上找第一個 1，步數固定，和 task 有幾個無關，這就是名字裡的 O(1)。</p>
+
+        <h2>task 多了會怎樣</h2>
+        <p>讓 runqueue 上有 <span class="tex">n</span> 個一直要 CPU 的 task，量每次 <code>schedule()</code> 做了幾次比較。這裡的「一次」是模擬器的成本模型：算一次 <code>goodness()</code>、查一次 bitmap、在紅黑樹上走一層，各算一次。</p>
+        <div class="tex-block">\text{cost}_{2.4} \approx n + 1, \qquad \text{cost}_{2.6.0} = 1</div>
+        <p>2.4 多出來的那一次是 prev。prev 還想跑時，先拿它當候選算一次 goodness，接著走整條 runqueue，而 prev 本身也在 runqueue 上。重算時間片的 <code>for_each_task</code> 也是 O(n)，但大約每 <span class="tex">n</span> 次挑選才發生一次，攤提下來每次只多一點。2.6.0 把「時間片用完、排到下一輪」的搬移放在 <code>scheduler_tick()</code> 裡做，<code>schedule()</code> 本身只剩查 bitmap。</p>
+        <div class="widget" id="w-cost"></div>
+        <p class="try">橫軸每一格 task 數翻一倍。2.4 的成本跟著翻倍，所以線越往右越陡；2.6.0 是一條平線。按「放大」看後來的 CFS 和 EEVDF：它們把 task 放在紅黑樹上（<a class="chref" data-ref="cfs"></a>），成本隨 <span class="tex">\log n</span> 成長，每翻一倍只多一兩層，在這張圖上是直線。CFS 挑選時直接取快取的最左節點，成本花在把 prev 插回樹、把 next 拿出來；EEVDF 的 <code>pick_eevdf()</code> 要往下走樹，找 eligible 之中 deadline 最早的，所以挑選本身也隨 <span class="tex">\log n</span> 成長。</p>
+        <p class="fine">成本模型只數比較與走訪節點的次數，不是 CPU 時間。真實的 2.4 還有兩項成本本站沒有模擬：每走過一個 task 就要讀它的 <code>task_struct</code>，cache miss 隨 <span class="tex">n</span> 增加；多核時整條 runqueue 共用一把 lock。工作負載也是最壞的情況，<span class="tex">n</span> 個 task 全都 runnable，一般桌面上同時 runnable 的 task 不多。</p>
         <details class="deep">
           <summary>深入：2.4 的 counter 也偷偷照顧了 sleeper</summary>
           <p>2.4 重新發時間片時，用 <code>for_each_task</code> 走過系統上所有 task，連 sleep 中的也算：</p>

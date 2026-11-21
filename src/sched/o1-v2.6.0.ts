@@ -11,7 +11,7 @@
 // 簡化：工作負載的 task 沒有真的 parent，fork 時假設 parent 是一個 sleep_avg 滿的 shell（見 task_new）。
 // 模擬器的開關（features）不是 kernel 的設定，2.6.0 沒有 sched_feat；關掉是為了看少了它會怎樣。
 
-import { NSEC_PER_SEC, resched_task, type Ns, type Rq, type SchedClass, type Task } from '../core/types.ts';
+import { NSEC_PER_SEC, resched_task, charge, type Ns, type Rq, type SchedClass, type Task } from '../core/types.ts';
 import { MAX_RT_PRIO } from '../core/weights.ts';
 
 // ---------------------------------------------------------------------------
@@ -260,7 +260,7 @@ export class O1V2_6_0 implements SchedClass<O1Entity> {
 
   /** dequeue_task()（:325） */
   private dequeue_task_array(rq: Rq<O1Entity>, p: Task<O1Entity>, array: PrioArray): void {
-    rq.ops += 1;
+    charge(rq, 'queue', 1);
     array.nr_active--;
     const q = array.queue[p.se.prio]!;
     q.splice(q.indexOf(p), 1);
@@ -269,7 +269,7 @@ export class O1V2_6_0 implements SchedClass<O1Entity> {
 
   /** enqueue_task()（:333）：放到該優先權佇列的尾端 */
   private enqueue_task_array(rq: Rq<O1Entity>, p: Task<O1Entity>, array: PrioArray): void {
-    rq.ops += 1;
+    charge(rq, 'queue', 1);
     array.queue[p.se.prio]!.push(p);
     array.bitmap[p.se.prio] = true;
     array.nr_active++;
@@ -278,7 +278,7 @@ export class O1V2_6_0 implements SchedClass<O1Entity> {
 
   /** sched_find_first_bit()：140 個 bit = 5 個 word，固定成本 */
   private sched_find_first_bit(rq: Rq<O1Entity>, bitmap: boolean[]): number {
-    rq.ops += 1;
+    charge(rq, 'pick', 1);
     return bitmap.indexOf(true);
   }
 

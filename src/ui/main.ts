@@ -16,6 +16,7 @@ import { mountSourcePage } from './source.ts';
 import { mountStartWidgets } from './start.ts';
 import { mountO1Widgets } from './o1-widgets.ts';
 import { mountEevdfWidgets } from './eevdf-widgets.ts';
+import { mountCostWidget } from './cost-widget.ts';
 import { startTour, stopTour, tourDone, type TourStep } from './tour.ts';
 
 const DURATION = 2 * SEC;
@@ -384,7 +385,24 @@ function metricsTable(run: RunData, gpsShare: number[]): string {
     <thead><tr><th>${tr('程式', 'Task')}</th><th>${term('nice')}</th><th>${CPU_SHARE}</th><th>${GPS_SHARE}</th><th>${tr(`${term('喚醒延遲')} 平均`, `${term('wakeup latency', '喚醒延遲')}, mean`)}</th><th>${term('p99')}</th><th>${tr(`相對 ${term('GPS')} 的 ${term('lag')} 範圍`, `${term('lag')} range vs. ${term('GPS')}`)}</th><th>${term(tr('主動 / 被搶', 'voluntary / preempted'), '主動 / 被搶')}</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
-  <p class="note">${tr('2 秒內 context switch', 'Context switches in 2 seconds:')} ${was(times(run.summary.nr_switches), run.base ? times(run.base.nr_switches) : undefined)}</p>`;
+  <p class="note">${tr('2 秒內 context switch', 'Context switches in 2 seconds:')} ${was(times(run.summary.nr_switches), run.base ? times(run.base.nr_switches) : undefined)}${gap}${costNote(run)}</p>`;
+}
+
+/** 每次 schedule() 的成本（比較／走訪節點的次數），依用途拆開 */
+function costNote(run: RunData): string {
+  const n = (x: number) => (Math.abs(x - Math.round(x)) < 0.05 ? String(Math.round(x)) : x.toFixed(1));
+  const b = run.summary.opsPerScheduleBy;
+  const parts = [
+    tr(`挑選 ${n(b.pick)}`, `picking ${n(b.pick)}`),
+    tr(`進出佇列 ${n(b.queue)}`, `queue updates ${n(b.queue)}`),
+    ...(b.recalc ? [tr(`重算時間片 ${n(b.recalc)}`, `slice recalculation ${n(b.recalc)}`)] : []),
+  ];
+  const title = tr(
+    '成本模型：算一次 goodness()、查一次 bitmap、在紅黑樹上走一層，各算一次。只算 schedule() 本身，不含 tick 與喚醒時的處理。',
+    'Cost model: one goodness() call, one bitmap lookup or one red-black tree level counts as one step. Only schedule() itself is counted, not the work done at ticks or wakeups.',
+  );
+  const avg = n(run.summary.opsPerSchedule);
+  return `<span title="${title}">${tr(`每次 schedule() 平均 ${avg} 步（${joinList(parts)}）`, `${avg} steps per schedule() on average (${joinList(parts)})`)}</span>`;
 }
 
 function scenarioCard(sc: Scenario): string {
@@ -915,6 +933,7 @@ $('glossary').innerHTML = glossaryHtml();
 mountStartWidgets();
 mountO1Widgets();
 mountEevdfWidgets();
+mountCostWidget();
 mountLearn();
 installTooltips();
 renderMathIn();

@@ -84,9 +84,19 @@ export interface Rq<SE> {
   trace: Tracer;
   /**
    * 排程決策成本的模型：資料結構操作中「比較 / 走訪節點」的次數。
-   * rbtree 插入以 ⌈log2(n+1)⌉ 計，O(n) 掃描以 n 計。
+   * rbtree 插入以 ⌈log2(n+1)⌉ 計，O(n) 掃描以 n 計。用 charge() 記，不要直接加。
    */
   ops: number;
+  /** ops 依用途分開：挑選下一個、進出佇列、重算時間片（O(n) 的 counter 重算） */
+  opsBy: Record<OpKind, number>;
+}
+
+export type OpKind = 'pick' | 'queue' | 'recalc';
+
+/** 記一筆排程決策成本 */
+export function charge<SE>(rq: Rq<SE>, kind: OpKind, n: number): void {
+  rq.ops += n;
+  rq.opsBy[kind] += n;
 }
 
 /** resched_task(rq->curr) */

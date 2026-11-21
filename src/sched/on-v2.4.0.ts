@@ -11,7 +11,7 @@
 // 省略：SMP（PROC_CHANGE_PENALTY、reschedule_idle 找空閒 CPU）、RT（SCHED_FIFO / SCHED_RR）、SCHED_YIELD。
 // 簡化：fork 時假設 parent 的 counter 是滿的 NICE_TO_TICKS(nice)（見 task_new）。
 
-import { resched_task, type Ns, type Rq, type SchedClass, type Task } from '../core/types.ts';
+import { resched_task, charge, type Ns, type Rq, type SchedClass, type Task } from '../core/types.ts';
 
 export interface OnTunables {
   /** CONFIG_HZ。2.4.0 i386 是 100（include/asm-i386/param.h），一個 tick 10ms */
@@ -119,14 +119,14 @@ export class OnV2_4_0 implements SchedClass<OnEntity> {
 
   /** add_to_runqueue()（:303）：加在串列的「頭」 */
   private add_to_runqueue(rq: Rq<OnEntity>, p: Task<OnEntity>): void {
-    rq.ops += 1;
+    charge(rq, 'queue', 1);
     this.runqueue.unshift(p);
     p.se.on_rq = true;
   }
 
   /** del_from_runqueue()（include/linux/sched.h） */
   private del_from_runqueue(rq: Rq<OnEntity>, p: Task<OnEntity>): void {
-    rq.ops += 1;
+    charge(rq, 'queue', 1);
     this.runqueue.splice(this.runqueue.indexOf(p), 1);
     p.se.on_rq = false;
   }
@@ -192,7 +192,7 @@ export class OnV2_4_0 implements SchedClass<OnEntity> {
           next = p;
         }
       }
-      rq.ops += scan - scan0;
+      charge(rq, 'pick', scan - scan0);
       if (c !== 0) {
         if (next) this.last_mm = next.pid;
         this.curr = next;
@@ -204,7 +204,7 @@ export class OnV2_4_0 implements SchedClass<OnEntity> {
       this.recalcs++;
       const all = this.tun.features.for_each_task ? this.tasks : this.runqueue;
       for (const p of all) p.se.counter = (p.se.counter >> 1) + this.NICE_TO_TICKS(p.nice);
-      rq.ops += all.length;
+      charge(rq, 'recalc', all.length);
       rq.trace.log(rq.clock, 'recalculate', undefined, { tasks: all.length });
     }
   }

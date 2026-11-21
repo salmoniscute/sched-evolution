@@ -5,7 +5,7 @@
 // 預設 sched_feat：NEW_FAIR_SLEEPERS、WAKEUP_PREEMPT、START_DEBIT 開；TREE_AVG、APPROX_AVG 關
 // （kernel/sched.c:464）。
 
-import { NSEC_PER_MSEC, resched_task, type Ns, type Rq, type SchedClass, type Task } from '../core/types.ts';
+import { NSEC_PER_MSEC, resched_task, charge, type Ns, type Rq, type SchedClass, type Task } from '../core/types.ts';
 import { Timeline } from '../core/timeline.ts';
 import { NICE_0_LOAD, set_load_weight, type LoadWeight } from '../core/weights.ts';
 
@@ -158,19 +158,19 @@ export class CfsV2_6_24 implements SchedClass<SchedEntity> {
 
   /** __enqueue_entity()（:146） */
   private __enqueue_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
-    rq.ops += cfs_rq.tasks_timeline.depth();
+    charge(rq, 'queue', cfs_rq.tasks_timeline.depth());
     cfs_rq.tasks_timeline.insert(se);
   }
 
   /** __dequeue_entity()（:183） */
   private __dequeue_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq, se: SchedEntity): void {
-    rq.ops += cfs_rq.tasks_timeline.depth();
+    charge(rq, 'queue', cfs_rq.tasks_timeline.depth());
     cfs_rq.tasks_timeline.remove(se);
   }
 
   /** __pick_next_entity()（:196）：rb_leftmost 有快取，O(1) */
   private __pick_next_entity(rq: Rq<SchedEntity>, cfs_rq: CfsRq): SchedEntity | undefined {
-    rq.ops += 1;
+    charge(rq, 'pick', 1);
     return cfs_rq.tasks_timeline.first();
   }
 
