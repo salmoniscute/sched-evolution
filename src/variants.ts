@@ -5,6 +5,7 @@ import { tr } from './i18n.ts';
 import { CfsV2_6_24, defaultTunables as cfsDefaults } from './sched/cfs-v2.6.24.ts';
 import { EevdfV6_6, defaultTunables as eevdfDefaults } from './sched/eevdf-v6.6.ts';
 import { EevdfV6_12, defaultTunablesV6_12 } from './sched/eevdf-v6.12.ts';
+import { EevdfPaper, defaultTunables as paperDefaults } from './sched/eevdf-paper.ts';
 import { O1V2_6_0, defaultTunables as o1Defaults } from './sched/o1-v2.6.0.ts';
 import { OnV2_4_0, defaultTunables as onDefaults } from './sched/on-v2.4.0.ts';
 
@@ -21,13 +22,16 @@ export interface Feature {
 
 export type Flags = Record<string, boolean>;
 
+/** paper：論文版的 EEVDF，不是 kernel */
+export type Family = 'on' | 'o1' | 'cfs' | 'eevdf' | 'paper';
+
 export interface SchedVariant {
   id: string;
   title: string;
   /** 選擇比較對象時的短名稱 */
   short: string;
   note: string;
-  family: 'on' | 'o1' | 'cfs' | 'eevdf';
+  family: Family;
   /** CONFIG_HZ：2.4 i386 是 100，之後是 1000 */
   hz: number;
   features: Feature[];
@@ -271,6 +275,42 @@ export const variants: SchedVariant[] = [
           DELAY_DEQUEUE: flag(f, 'DELAY_DEQUEUE'),
         },
       }),
+    tasks: (specs, f) => (flag(f, 'custom_slice') ? specs : specs.map(({ slice: _slice, ...rest }) => rest)),
+  },
+  {
+    id: 'eevdf-paper',
+    title: tr('EEVDF 論文（1995）', 'EEVDF paper (1995)'),
+    short: tr('EEVDF 論文', 'EEVDF paper'),
+    hz: 1000,
+    note: tr(
+      '不是 kernel，是 Stoica 與 Abdel-Wahab 論文裡的演算法，拿來當理想的參考：V 用實數精確計算；每次分配一個 0.1ms 的 quantum 給 eligible 中 deadline 最早的 request，醒來的程式等到 quantum 結束才重新比；離開與加入時照論文的公式調整 V，lag 不截斷。',
+      'Not a kernel: the algorithm from the Stoica and Abdel-Wahab paper, used as the ideal reference. V is computed exactly with real numbers; each 0.1ms quantum goes to the eligible request with the earliest deadline, and a waking task waits for the quantum to end before deadlines are compared again; V is adjusted by the paper\'s formulas when tasks leave and join, and lag is never clipped.',
+    ),
+    family: 'paper',
+    features: [
+      {
+        key: 'custom_slice',
+        sim: true,
+        on: tr(
+          '每個程式用自己要求的 request 長度 r（論文本來就允許 request 大小不同）。',
+          'Each task uses the request length r it asks for (the paper allows requests of different sizes from the start).',
+        ),
+        off: tr('所有程式的 request 都是 0.75ms，和 v6.6 一樣。', 'Every request is 0.75ms, as in v6.6.'),
+      },
+      {
+        key: 'keep_lag',
+        sim: true,
+        on: tr(
+          '論文的 strategy 1：離開時的 lag 保留到重新加入，加入時照公式調整 V，自己和其他程式按權重分攤這筆 lag。kernel 的 PLACE_LAG 對應這個策略。',
+          "The paper's strategy 1: the lag at leaving is kept until the task rejoins; on joining V is adjusted by the formula, and the task and the others share that lag in proportion to their weights. The kernel's PLACE_LAG corresponds to this strategy.",
+        ),
+        off: tr(
+          '論文的 strategy 2：重新加入一律從 lag = 0 開始，離開前的帳不算了（kernel 關掉 PLACE_LAG 時的做法）。',
+          "The paper's strategy 2: a rejoining task always starts at lag = 0 and its previous balance is dropped (what the kernel does with PLACE_LAG off).",
+        ),
+      },
+    ],
+    make: (f) => new EevdfPaper({ ...paperDefaults, keep_lag: flag(f, 'keep_lag') }),
     tasks: (specs, f) => (flag(f, 'custom_slice') ? specs : specs.map(({ slice: _slice, ...rest }) => rest)),
   },
 ];

@@ -200,3 +200,12 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - N 個 nice 0 hog、2 秒：2.4 每次挑選 ≈ n + 1（prev 先算一次，prev 也在 runqueue 上），重算後再掃一輪，攤提多約 1；2.6.0 恆為 1（時間片用完的搬移在 `scheduler_tick()`）；CFS 挑選 2、進出樹 ≈ 2 log n；EEVDF 挑選本身也隨 log n 成長。v6.12 和 v6.6 相同。
   - 情境 1 不放模擬頁（時間軸放不下），做成學習路線第 4 章的小圖（`src/cost.ts` + `src/ui/cost-widget.ts`，`#w-cost`），測試 `test/cost.test.ts`。模擬頁的指標表加上每次 `schedule()` 的平均步數與拆解。
   - 成本模型不含 cache miss 與多核 lock，網頁上已註明。
+
+- 2026-11-21：論文版的離散 EEVDF（`src/sched/eevdf-paper.ts`，family `paper`，模擬頁可勾選「EEVDF 論文」，預設不比較）。筆記 `notes/09-eevdf-paper.md`，測試 `test/eevdf-paper.test.ts`，決策說明 `src/ui/inspect-paper.ts`。第 8 章新增深入區塊「論文的演算法和 kernel 差在哪」。
+  - 論文 PDF 用 PDFKit（Swift）抽文字；公式的正負號抽不出來，關鍵頁轉成圖片讀。
+  - 引擎新增選用的 `next_timer()` / `timer_fire()`（類似 hrtick），kernel 版本不實作。
+  - 發現：論文 Eq. 18、19 維持 lag 總和為 0，所以論文的 V 恆等於加權平均，和 `avg_vruntime()` 是同一個量；「V 是近似」是相對 GPS 而言。
+  - 發現：照 Eq. 19，帶著 lag ℓ 加入的 task 只帶回 ℓ·W/(W + w)；kernel 的 (W + w)/W 放大是刻意偏離論文（`place_entity()` 註解：lag would evaporate）。情境 4 audio 最久等 420µs，v6.6 平均 623µs。
+  - 發現：`PLACE_LAG` 開／關 = 論文 strategy 1 / 2（`features.h` 註解）；`DELAY_DEQUEUE` 與 strategy 3 處理負 lag 的想法相同（kernel 沒有這樣註明）。
+  - 論文的 eligible 是 request 的性質（ve ≤ V），request 進行中不會失去資格，行為接近開著 `RUN_TO_PARITY` 的 kernel。
+  - 待辦：CLAUDE.md「數學說明」一節列的 EEVDF 差異可以照這次的結果更新（V 不是相對論文的近似）。

@@ -538,6 +538,25 @@
           <div class="tex-block">-r_{\max} \;&lt;\; \text{lag}_i \;&lt;\; \max(r_{\max},\, q)</div>
           <p><span class="tex">r_{\max}</span> 是最大的 request（一次要求的執行長度，也就是 slice），<span class="tex">q</span> 是排程的時間單位。模擬裡 0.75ms 的 slice 會被 1ms 的 tick 放大成 1ms（tick 時才檢查有沒有用完），量到的 lag 都在 ±1ms 內，符合這個上下界。兩個 nice 0 的 hog 在 CFS v2.6.24 下一次跑一整段 <code>sched_slice()</code>（約 10ms），lag 擺到 5ms 以上；EEVDF 只擺 0.5ms 左右。</p>
         </details>
+        <details class="deep">
+          <summary>深入：論文的演算法和 kernel 差在哪</summary>
+          <p>Stoica 與 Abdel-Wahab 的論文定義的是一個理想的演算法：<span class="tex">V</span> 照 <span class="tex">dV/dt = 1/W</span> 精確累加；每個 task 有一個 request，從 virtual eligible time <span class="tex">v_e</span> 開始、到 virtual deadline <span class="tex">v_d = v_e + r/w</span> 結束；每一個 quantum <span class="tex">q</span> 分給 eligible（<span class="tex">v_e \le V</span>）的 request 裡 <span class="tex">v_d</span> 最早的。task 離開與加入時，論文用兩條式子調整 <span class="tex">V</span>：</p>
+          <div class="tex-block">\text{離開：}\; V \leftarrow V + \frac{\text{lag}_j}{\sum_{\text{離開後}} w_i}, \qquad \text{加入：}\; V \leftarrow V - \frac{\text{lag}_j}{\sum_{\text{加入後}} w_i}</div>
+          <p>這兩條式子讓所有 task 的 lag 總和一直是 0，也就是 <span class="tex">\sum w_i (V - v_i) = 0</span>，移項就得到 <span class="tex">V = \sum w_i v_i / W</span>。所以論文的 <span class="tex">V</span> 和 kernel 的 <code>avg_vruntime()</code> 在精確的算術下是同一個量，kernel 只是改成直接算加權平均，再加上整數運算的截斷。</p>
+          <p>加入的那條式子分母包含加入者自己，所以帶著 lag <span class="tex">\ell</span> 回來的 task，自己也分攤了一份，實際只帶回 <span class="tex">\ell \cdot W/(W + w_i)</span>。上面表格「直接放」的那一列就是論文的結果；kernel 的 <code>place_entity()</code> 刻意放大 <span class="tex">(W + w_i)/W</span> 把這一份補回來，註解寫的理由是 “otherwise lag can quickly evaporate”。拿情境 4 來看，audio 每次帶著約 −0.21ms 的 lag 去睡：論文只帶回三分之二，醒來最久等 <span data-sim="latency eevdf-paper audio.max">420µs</span>（<span class="tex">0.14 \div \tfrac{1}{3}</span>）；kernel v6.6 整筆帶回，平均要等 <span data-sim="latency eevdf-v6.6 audio.lat">623µs</span>。</p>
+          <table class="mini eq-ex">
+            <thead><tr><th></th><th>論文</th><th>kernel（v6.6 / v6.12）</th></tr></thead>
+            <tbody>
+              <tr><td>什麼時候重新挑</td><td>quantum 到期、request 用完、有 task 離開；醒來的 task 等目前的 quantum 結束</td><td>tick 時檢查 slice 用完沒（0.75ms 實際變成 1ms）；醒來時馬上試挑，可以立刻搶占</td></tr>
+              <tr><td>eligible 看什麼</td><td>request 的 <span class="tex">v_e</span>：request 進行中一直 eligible</td><td>entity 現在的 vruntime：跑著跑著會變成不 eligible，靠 <code>RUN_TO_PARITY</code> 讓它跑完 slice</td></tr>
+              <tr><td>重新加入時的 lag</td><td>strategy 1 保留、strategy 2 歸零；加入時自己分攤一份</td><td><code>PLACE_LAG</code> 開著是 strategy 1、關掉是 strategy 2（<code>features.h</code> 的註解）；放大後整筆帶回</td></tr>
+              <tr><td>lag 的範圍</td><td>不截斷，上下界是證明出來的</td><td>截斷在 <span class="tex">\max(2 \times \text{slice}, \text{TICK})</span></td></tr>
+              <tr><td>lag 為負時離開</td><td>strategy 3：先發一個長度 0 的 request，等 lag 回到 0 才離開</td><td>v6.12 的 <code>DELAY_DEQUEUE</code> 想法相同：留在 runqueue 上，lag 還完才真正離開</td></tr>
+            </tbody>
+          </table>
+          <p>重新挑選的時機差最多。情境 5 的三個 hog 沒有人睡覺，也就沒有加入和離開，兩邊只差在這裡。nice 5 那個 task 相對 GPS 的 lag，kernel v6.6 在 <span data-sim="nice eevdf-v6.6 nice5.lagmin">−0.92ms</span> 到 <span data-sim="nice eevdf-v6.6 nice5.lagmax">0.49ms</span> 之間，下界超過了 slice 0.75ms，因為 tick 把 request 放大成 1ms；論文版在 <span data-sim="nice eevdf-paper nice5.lagmin">−0.18ms</span> 到 <span data-sim="nice eevdf-paper nice5.lagmax">0.39ms</span> 之間。</p>
+          <p class="fine">模擬頁的「比較」可以勾選「EEVDF 論文」，和 kernel 版並排看。論文版的 quantum 取 0.1ms，數值用浮點數，deadline 平手時照論文 Figure 1 的選法。論文附錄 A 的程式讓重新加入的 request 立刻 eligible，這裡照正文第 3 節的定義，lag 為負的要等 <span class="tex">V</span> 追上來。出處：I. Stoica, H. Abdel-Wahab, TR-95-22, Old Dominion University, 1995，第 3 至 6 節與附錄 A。</p>
+        </details>
 
         <h2>v6.6 還做不到的事</h2>
         <p>v6.6 所有 task 的 slice 都固定為 <code>sysctl_sched_base_slice</code>（0.75ms），deadline 拉不開，CPU scheduler 無從得知誰比較急。再加上 lag 會原樣帶回，剛執行完一段就去 sleep 的 task，醒來時多半帶著負的 lag，不 eligible，還得再等一下。這兩件事合起來，就是 v6.12 要解決的問題（<a class="chref" data-ref="slice"></a>）。</p>

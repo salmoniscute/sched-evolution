@@ -4,7 +4,7 @@ import { theoreticalShares } from '../src/core/metrics.ts';
 import { NSEC_PER_MSEC as MS, NSEC_PER_SEC as SEC } from '../src/core/types.ts';
 import { hog, legacySchedulers, run, schedulers } from './helpers.ts';
 
-describe.each(schedulers)('%s', (_id, make) => {
+describe.each(schedulers)('%s', (id, make) => {
   describe('比較情境 5：不同 nice 的 CPU 分配比例', () => {
     it.each([[[0, 0]], [[-5, 0, 5]], [[0, 1]], [[-10, 0, 10, 19]]])(
       'nice %j 的實際比例接近 w_i / Σw',
@@ -20,7 +20,8 @@ describe.each(schedulers)('%s', (_id, make) => {
   });
 
   describe('不變式', () => {
-    it('min_vruntime 單調遞增', () => {
+    // 論文版沒有 min_vruntime（V 才是它的參考點，而且加入／離開時會跳動）
+    it.skipIf(id === 'eevdf-paper')('min_vruntime 單調遞增', () => {
       const { result } = run(
         make(),
         [hog('a', -3), hog('b', 2), { name: 'c', nice: 0, pattern: [{ run: 3 * MS, sleep: 5 * MS }] }],

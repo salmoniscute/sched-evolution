@@ -206,7 +206,8 @@ export class Simulator<SE> {
       }
       const first = this.pendingArrivals[0];
       const nextArrival = first ? (first.spec.arrival ?? 0) : Infinity;
-      const t = Math.min(this.nextTick, burstEnd, nextWake, nextArrival, end);
+      const timer = this.sched.next_timer?.(rq) ?? Infinity;
+      const t = Math.min(this.nextTick, burstEnd, nextWake, nextArrival, timer, end);
 
       this.advance(t);
       if (t >= end) break;
@@ -225,6 +226,11 @@ export class Simulator<SE> {
         this.scheduler_tick();
         if (!pending && rq.need_resched) this.cause ??= { kind: 'tick', pid: rq.curr?.pid ?? null };
         this.nextTick += this.tickNs;
+      }
+      if (t === timer && this.sched.timer_fire) {
+        const pending = rq.need_resched;
+        this.sched.timer_fire(rq);
+        if (!pending && rq.need_resched) this.cause ??= { kind: 'tick', pid: rq.curr?.pid ?? null };
       }
       // 從中斷 / 喚醒返回時檢查 TIF_NEED_RESCHED
       if (rq.need_resched) this.schedule();

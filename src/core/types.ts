@@ -123,4 +123,11 @@ export interface SchedClass<SE> {
   task_tick(rq: Rq<SE>, curr: Task<SE>): void;
   /** 給視覺化用：目前 runqueue 的狀態快照 */
   snapshot(rq: Rq<SE>): unknown;
+  /**
+   * 選用：排程器自己的計時器（類似 hrtick）。回傳下一次要被叫醒的絕對時間（ns），沒有就回傳 null。
+   * kernel 版本都靠 tick，不實作；論文版 EEVDF 用它在 quantum 到期、request 用完的那一刻重新分配。
+   */
+  next_timer?(rq: Rq<SE>): Ns | null;
+  /** 計時器到期時呼叫，可以設 need_resched */
+  timer_fire?(rq: Rq<SE>): void;
 }

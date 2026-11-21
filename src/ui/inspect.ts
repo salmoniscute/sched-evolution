@@ -5,13 +5,14 @@ import { NSEC_PER_MSEC as MS, type Ns } from '../core/types.ts';
 import { NICE_0_LOAD } from '../core/weights.ts';
 import type { CfsSnapshot } from '../sched/cfs-v2.6.24.ts';
 import type { EevdfSnapshot } from '../sched/eevdf-v6.6.ts';
-import type { Flags } from '../variants.ts';
+import type { Family, Flags } from '../variants.ts';
 import { gap, joinList, tr } from '../i18n.ts';
 import { linkTerms, term } from './glossary.ts';
 import { explainLegacy, legacyDetail } from './inspect-legacy.ts';
+import { explainPaper } from './inspect-paper.ts';
 
 export interface InspectCtx {
-  family: 'on' | 'o1' | 'cfs' | 'eevdf';
+  family: Family;
   names: string[];
   /** 第 i 個 task 的 CSS 顏色 */
   color: (i: number) => string;
@@ -144,6 +145,7 @@ export const isLegacy = (ctx: InspectCtx) => ctx.family === 'on' || ctx.family =
 
 export function explain(ctx: InspectCtx, idx: number): Explained {
   if (isLegacy(ctx)) return explainLegacy(ctx, idx);
+  if (ctx.family === 'paper') return explainPaper(ctx, idx);
   const e = ctx.events[idx]!;
   const rows = rowsOf(e.snapshot);
   const nm = (pid: number | null) => (pid === null ? 'idle' : (ctx.names[pid - 1] ?? `pid ${pid}`));
@@ -487,7 +489,8 @@ export function explain(ctx: InspectCtx, idx: number): Explained {
 function numberLine(ctx: InspectCtx, x: Explained): string {
   const { rows } = x;
   if (!rows.length) return '';
-  const eevdf = ctx.family === 'eevdf';
+  const paper = ctx.family === 'paper';
+  const eevdf = ctx.family === 'eevdf' || paper;
   const W = 640;
   const LABEL = 92;
   const R = 28;
@@ -526,7 +529,12 @@ function numberLine(ctx: InspectCtx, x: Explained): string {
     if (picked) svg += `<circle cx="${X(r.rel)}" cy="${y}" r="7.5" class="ring"/>`;
   });
   svg += '</svg>';
-  const legend = eevdf
+  const legend = paper
+    ? tr(
+        '每一列是一個在競爭的程式，線段是它目前的 request：左端的圓點是 virtual eligible time（ve），右端的直槓是 virtual deadline（vd），虛線是 V。ve 在 V 左邊（綠色區域）的 request 是 eligible 的；其中直槓最靠左的拿到下一個 quantum（紫圈）。',
+        'Each row is a competing task and the segment is its current request: the dot at the left end is the virtual eligible time (ve), the bar at the right end is the virtual deadline (vd), and the dashed line is V. A request whose ve is left of V (green area) is eligible; among those the leftmost bar gets the next quantum (purple ring).',
+      )
+    : eevdf
     ? tr(
         '每一列是一個想跑的程式。圓點是它的 vruntime，虛線是 V。圓點在 V 左邊（綠色區域）表示 lag ≥ 0、沒有多拿，有資格被選；在右邊、畫成空心的表示多拿了，要等。線段右端的直槓是 deadline，有資格的程式裡直槓最靠左的被選中（紫圈）。',
         'Each row is a runnable task. The dot is its vruntime and the dashed line is V. A dot left of V (green area) means lag ≥ 0, not ahead of its share, so it may be picked; a hollow dot on the right has taken too much and must wait. The bar at the right end of each segment is the deadline; among eligible tasks the leftmost bar is picked (purple ring).',
@@ -539,7 +547,8 @@ function numberLine(ctx: InspectCtx, x: Explained): string {
 }
 
 function table(ctx: InspectCtx, x: Explained, e: SchedEvent): string {
-  const eevdf = ctx.family === 'eevdf';
+  const paper = ctx.family === 'paper';
+  const eevdf = ctx.family === 'eevdf' || paper;
   const state = (r: Row) => {
     if (r.delayed) return tr('已睡著（delayed）', 'asleep (delayed)');
     return taskState(x, e, r.pid);
@@ -549,17 +558,24 @@ function table(ctx: InspectCtx, x: Explained, e: SchedEvent): string {
       const name = `<span class="swatch" style="background:${ctx.color(r.pid - 1)}"></span>${esc(ctx.names[r.pid - 1] ?? '')}`;
       const cls = r.pid === x.chosen ? ' class="chosen"' : '';
       return eevdf
-        ? `<tr${cls}><td>${name}</td><td>${state(r)}</td><td>${sms(-r.rel)}</td><td>${r.eligible ? tr('是', 'yes') : tr('否', 'no')}</td><td>${sms(r.dl!)}</td><td>${dur(r.slice)}</td></tr>`
+        ? `<tr${cls}><td>${name}</td><td>${state(r)}</td><td>${sms(paper ? r.rel : -r.rel)}</td><td>${r.eligible ? tr('是', 'yes') : tr('否', 'no')}</td><td>${sms(r.dl!)}</td><td>${dur(r.slice)}</td></tr>`
         : `<tr${cls}><td>${name}</td><td>${state(r)}</td><td>${sms(r.rel)}</td><td>${dur(r.slice)}</td></tr>`;
     })
     .join('');
-  const head = eevdf
+  const head = paper
+    ? `<th>${tr('程式', 'Task')}</th><th>${tr('狀態', 'State')}</th><th>ve − V</th><th>${term('eligible')}</th><th>vd − V</th><th>${tr('request 長度 r', 'request length r')}</th>`
+    : eevdf
     ? `<th>${tr('程式', 'Task')}</th><th>${tr('狀態', 'State')}</th><th>${term('lag')}${tr('（V − vruntime）', ' (V − vruntime)')}</th><th>${term('eligible')}</th><th>${term('deadline')} − V</th><th>${term('slice')}</th>`
     : `<th>${tr('程式', 'Task')}</th><th>${tr('狀態', 'State')}</th><th>${term('vruntime')} − ${term('min_vruntime')}</th><th>${term('sched_slice')}</th>`;
   const asleep = ctx.names.filter((_, i) => !x.rows.some((r) => r.pid === i + 1));
   const foot =
     (asleep.length ? tr(`睡覺中、不在佇列上：${joinList(asleep.map(esc))}。`, `Asleep, not on the queue: ${joinList(asleep.map(esc))}. `) : '') +
-    (eevdf
+    (paper
+      ? tr(
+          '論文的 V 是精確累加的實數，加入與離開時照式 (18)、(19) 調整；ve − V ≤ 0 的 request 才 eligible。',
+          "The paper's V is an exact real-valued sum, adjusted on join and leave by Eqs. (18) and (19); a request is eligible only when ve − V ≤ 0.",
+        )
+      : eevdf
       ? tr(
           '這裡的 lag 是 kernel 自己用 V（vruntime 的加權平均）算的，單位是虛擬時間；下面那張圖的 lag 是照 GPS 另外算的，兩者不是同一個數字。',
           'The lag here is what the kernel itself computes from V (the weighted average of vruntime), in virtual time; the lag in the chart below is computed separately from GPS, and the two are not the same number.',
