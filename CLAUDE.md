@@ -62,7 +62,7 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - O(1) / O(n) → 沒有比例分享的理論模型，本質是優先權 + 時間片的啟發式。仍可拿 GPS（nice 換算 CFS 權重）對照「離比例分享多遠」，但介面上要標明這不是它們的設計目標。
 - 演進故事線：v2.6.23 用 `wait_runtime` 直接記錄「應得 − 實得」（也就是 lag，並截斷在 ±limit）；v2.6.24 改成 `vruntime`，lag 不再明確存在；v6.6 EEVDF 又把 lag（`vlag`）正式帶回來，同樣有截斷。v2.6.23 只在歷史說明中提，不實作。
 - 每一項差異標出處：kernel 註解（抽取腳本，附行號）或論文（書目 + 章節，推導用自己的話重寫）。引用哪些論文由作者決定。
-- 已知的差異（EEVDF v6.6）：V 用加權平均近似，只有在 lag = 0 時加入／離開才等於理想值（`avg_vruntime` 註解的 NOTE）；lag 被強制截斷在 max(2×slice, TICK)，論文的上下界是推導出來的；加入時要放大 lag `(W + w_i)/W`；tick 粒度讓 0.75ms slice 實際上變成 1ms；`RUN_TO_PARITY` 讓 curr 跑完 slice 才讓位；整數運算的截斷與偏左取整；fork 的半 slice 放置被覆蓋。
+- 已知的差異（EEVDF v6.6）：V 用加權平均，相對 GPS 流體只有在 lag = 0 時加入／離開才相等（`avg_vruntime` 註解的 NOTE），相對論文則是同一個量（論文 Eq. 18、19 維持 lag 總和為 0）；lag 被強制截斷在 max(2×slice, TICK)，論文的上下界是推導出來的；加入時要放大 lag `(W + w_i)/W`（論文讓加入者自己分攤一份，kernel 刻意補回）；tick 粒度讓 0.75ms slice 實際上變成 1ms；`RUN_TO_PARITY` 讓 curr 跑完 slice 才讓位；整數運算的截斷與偏左取整；fork 的半 slice 放置被覆蓋。
 - 已知的差異（CFS v2.6.24）：沒有 lag 概念，`min_vruntime` 不是理想的 V；喚醒時 `vruntime -= sysctl_sched_latency` 給睡眠者補償（睡太久的則失去應得的服務）；`START_DEBIT` 讓新 task 先欠一段。
 
 ## 比較情境
@@ -208,4 +208,3 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 發現：照 Eq. 19，帶著 lag ℓ 加入的 task 只帶回 ℓ·W/(W + w)；kernel 的 (W + w)/W 放大是刻意偏離論文（`place_entity()` 註解：lag would evaporate）。情境 4 audio 最久等 420µs，v6.6 平均 623µs。
   - 發現：`PLACE_LAG` 開／關 = 論文 strategy 1 / 2（`features.h` 註解）；`DELAY_DEQUEUE` 與 strategy 3 處理負 lag 的想法相同（kernel 沒有這樣註明）。
   - 論文的 eligible 是 request 的性質（ve ≤ V），request 進行中不會失去資格，行為接近開著 `RUN_TO_PARITY` 的 kernel。
-  - 待辦：CLAUDE.md「數學說明」一節列的 EEVDF 差異可以照這次的結果更新（V 不是相對論文的近似）。
