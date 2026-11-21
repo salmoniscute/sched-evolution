@@ -189,7 +189,7 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 新增第 10 章「v6.12：讓 task 說出自己的 slice」（`data-ch="slice"`）：custom slice、`PREEMPT_SHORT`（`do_preempt_short()` 的條件）、`DELAY_DEQUEUE` + `DELAY_ZERO`，以及「睡著時還債」等於原諒負 lag 的代價。小圖 `src/ui/eevdf-widgets.ts`（`#w-v612`）：三個開關，玩具模型畫 audio 一個週期的 lag，下方數字用模擬核心現場跑情境 4。
   - 情境 4 量到：custom slice、`PREEMPT_SHORT`、`DELAY_DEQUEUE` 缺任何一樣，audio 平均都等 620µs（= 0.21ms 負 lag ÷ 1/3）；三樣都有是 3µs。
   - 學習路線仍只有中文。`#page-concepts` 是舊頁殘留的 HTML，路由已導走，可以刪。
-  - 待辦：`sched_slice()` 公式沒寫進 CFS 章；第 5 章的 ⌈b*⌉／⌊b*⌋ 可移進深入；最後缺一章總結（各代怎麼回答公平與延遲）與 sched_ext。
+  - 待辦：`sched_slice()` 公式沒寫進 CFS 章；第 5 章的 ⌈b*⌉／⌊b*⌋ 可移進深入。（總結章與 sched_ext 已在 2026-11-21 完成）
 
 - 2026-11-21：說明文字裡的模擬數字改由測試核對。寫成 `<span data-sim="情境 排程器 [±開關] [@時間] 指標">數字</span>`（`scenarios.ts` 用 `simIn()`，`src/sim-tag.ts`），`test/sim-claims.test.ts` 照標記重跑模擬，以字面的單位與小數位數比對（`src/sim-claims.ts`）。`index.html` 51 處、`scenarios.ts` 中英各 29 處，現有數字全部正確。
   - 規則：學習路線或情境結論引用模擬跑出來的數字時一定要加標記；公式推導、玩具例子、外部 benchmark 的數字不加。
@@ -208,3 +208,8 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 發現：照 Eq. 19，帶著 lag ℓ 加入的 task 只帶回 ℓ·W/(W + w)；kernel 的 (W + w)/W 放大是刻意偏離論文（`place_entity()` 註解：lag would evaporate）。情境 4 audio 最久等 420µs，v6.6 平均 623µs。
   - 發現：`PLACE_LAG` 開／關 = 論文 strategy 1 / 2（`features.h` 註解）；`DELAY_DEQUEUE` 與 strategy 3 處理負 lag 的想法相同（kernel 沒有這樣註明）。
   - 論文的 eligible 是 request 的性質（ve ≤ V），request 進行中不會失去資格，行為接近開著 `RUN_TO_PARITY` 的 kernel。
+
+- 2026-11-21：學習路線新增第 12 章「回顧：各代怎麼回答公平與延遲」（`data-ch="recap"`）：各代挑選規則各一行公式、「誰在意延遲：從猜到說」比較表（數字用 `data-sim` 標記）、理論與實作的距離、sched_ext 結尾介紹。
+  - sched_ext 的內容對照 `kernel-src/v6.12/Documentation/scheduler/sched-ext.rst` 與 `kernel/sched/ext.c`（新加進 `fetch-kernel-src.sh`）：`struct sched_ext_ops` 只有 `ops.name` 必填、DSQ（local / global，`scx_bpf_dispatch_vtime()` 是優先佇列）、出錯／task 卡住／SysRq-S 退回 fair class、watchdog 預設 `SCX_WATCHDOG_MAX_TIMEOUT` = 30 × HZ、ABI 不穩定。
+  - 長文字的表格用 `table.mini.eq-ex.wrap`（`eq-ex` 單獨用會靠右、不換行，會撐破卡片）。
+  - zsh 的 `path` 變數綁定 `PATH`，迴圈變數不要取名 `path`。

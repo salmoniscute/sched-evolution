@@ -27,6 +27,8 @@ FILES=(
   "v6.12   kernel/sched/sched.h"
   "v6.12   kernel/sched/features.h"
   "v6.12   include/linux/sched.h"     # struct sched_entity（custom_slice / min_slice）
+  "v6.12   kernel/sched/ext.c"        # sched_ext：struct sched_ext_ops、watchdog、退回 fair class
+  "v6.12   Documentation/scheduler/sched-ext.rst"
 )
 
 for entry in "${FILES[@]}"; do

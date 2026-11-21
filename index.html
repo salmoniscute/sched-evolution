@@ -544,7 +544,7 @@
           <div class="tex-block">\text{離開：}\; V \leftarrow V + \frac{\text{lag}_j}{\sum_{\text{離開後}} w_i}, \qquad \text{加入：}\; V \leftarrow V - \frac{\text{lag}_j}{\sum_{\text{加入後}} w_i}</div>
           <p>這兩條式子讓所有 task 的 lag 總和一直是 0，也就是 <span class="tex">\sum w_i (V - v_i) = 0</span>，移項就得到 <span class="tex">V = \sum w_i v_i / W</span>。所以論文的 <span class="tex">V</span> 和 kernel 的 <code>avg_vruntime()</code> 在精確的算術下是同一個量，kernel 只是改成直接算加權平均，再加上整數運算的截斷。</p>
           <p>加入的那條式子分母包含加入者自己，所以帶著 lag <span class="tex">\ell</span> 回來的 task，自己也分攤了一份，實際只帶回 <span class="tex">\ell \cdot W/(W + w_i)</span>。上面表格「直接放」的那一列就是論文的結果；kernel 的 <code>place_entity()</code> 刻意放大 <span class="tex">(W + w_i)/W</span> 把這一份補回來，註解寫的理由是 “otherwise lag can quickly evaporate”。拿情境 4 來看，audio 每次帶著約 −0.21ms 的 lag 去睡：論文只帶回三分之二，醒來最久等 <span data-sim="latency eevdf-paper audio.max">420µs</span>（<span class="tex">0.14 \div \tfrac{1}{3}</span>）；kernel v6.6 整筆帶回，平均要等 <span data-sim="latency eevdf-v6.6 audio.lat">623µs</span>。</p>
-          <table class="mini eq-ex">
+          <table class="mini eq-ex wrap">
             <thead><tr><th></th><th>論文</th><th>kernel（v6.6 / v6.12）</th></tr></thead>
             <tbody>
               <tr><td>什麼時候重新挑</td><td>quantum 到期、request 用完、有 task 離開；醒來的 task 等目前的 quantum 結束</td><td>tick 時檢查 slice 用完沒（0.75ms 實際變成 1ms）；醒來時馬上試挑，可以立刻搶占</td></tr>
@@ -688,6 +688,39 @@
           <p>CFS 和 v6.12 在這裡和 GPS 不一樣。CFS 讓剛醒的 task 從 <code>min_vruntime − sched_latency</code> 開始，等於每次醒來都送它一段時間。v6.12 的 <code>DELAY_DEQUEUE</code> 讓 lag 為負的 task 睡著後還留在 runqueue 上，慢慢把負的 lag 還掉，醒來時 lag 大約是 0。從「睡覺時 lag 不變」的角度看，這兩種都等於把欠帳免了，所以圖上它們的 audio、editor 會一路往下。如果改成「睡覺就把負的 lag 清掉」，v6.12 看起來會是公平的。論文對帶著 lag 離開的 task 有幾種處理方式，這部分之後會再對照原文。</p>
         </details>
         <p class="fine">模擬器不計 context switch 的成本，切換是瞬間完成的，所以 CPU 比例不會因為切換變多而下降。看模擬結果時，請把 context switch 次數當作吞吐量成本的指標；CPU 比例反映的是公平，不是吞吐量。</p>
+      </article>
+
+      <article class="card explain chapter" data-ch="recap" data-title="回顧：各代怎麼回答公平與延遲" data-q="同一個問題，各代的答案差在哪？">
+        <p><a class="chref" data-ref="problem"></a>開頭的問題是：只有一顆 CPU，該讓誰先執行？拆開來其實是兩個問題，長期下來每個 task 該分到多少（公平），以及醒來之後多快輪到它（延遲）。這一章把各代的答案放在一起看。</p>
+
+        <h2>挑選規則，一行就寫得完</h2>
+        <p>每一代挑下一個 task 的規則都很短，差別在比的是什麼：</p>
+        <div class="tex-block">\begin{aligned} \text{2.4：}\; & \max_i \; \text{goodness}_i = \text{counter}_i + 20 - \text{nice}_i \\ \text{2.6.0：}\; & \min_i \; \text{prio}_i = \texttt{static\_prio}_i - \text{bonus}_i \\ \text{CFS：}\; & \min_i \; v_i, \qquad v_i \mathrel{+}= \Delta t \cdot \tfrac{1024}{w_i} \\ \text{EEVDF：}\; & \min_{v_i \le V} \; d_i, \qquad d_i = v_i + r_i \cdot \tfrac{1024}{w_i} \end{aligned}</div>
+        <p>2.4 和 2.6.0 把「該分多少」和「該多快」混在同一個數字裡：goodness 和 prio 同時決定誰先跑，而時間片的長短又決定比例。CFS 只留下公平，<span class="tex">v_i</span> 齊頭並進就是照權重分（<a class="chref" data-ref="cfs"></a>），延遲沒有自己的參數，只能靠喚醒時的補償。EEVDF 多了第二個參數 <span class="tex">r_i</span>：<span class="tex">w_i</span> 決定長期拿多少，<span class="tex">r_i</span> 決定 deadline 有多早，兩件事終於分開了。</p>
+
+        <h2>誰在意延遲：從猜到說</h2>
+        <table class="mini eq-ex wrap">
+          <thead><tr><th></th><th>怎麼知道誰在意延遲</th><th>給它什麼</th><th>本站量到的代價</th></tr></thead>
+          <tbody>
+            <tr><td>O(n) 2.4</td><td>不分辨。睡著時遇到重算的 task，沒用完的 counter 保留一半</td><td>goodness 較高，醒來能插隊</td><td>每次挑選都要走過整條 runqueue（<a class="chref" data-ref="o1"></a>）</td></tr>
+            <tr><td>O(1) 2.6.0</td><td>猜：<code>sleep_avg</code> 越高越像 interactive</td><td>優先權最多 +5，時間片用完還能留在這一輪</td><td>跑 2.3ms 睡 0.83ms 的 cheat 拿走 <span data-sim="cheat o1-v2.6.0 cheat.share">67.0%</span>，公平的份是 <span data-sim="cheat gps cheat.share">29.8%</span></td></tr>
+            <tr><td>CFS v2.6.24</td><td>不分辨，每個醒來的 task 都補</td><td>放在 <code>min_vruntime</code> − <code>sched_latency</code>，通常能立刻搶占</td><td>audio 拿 <span data-sim="latency cfs-v2.6.24 audio.share">6.06%</span>，比公平的份 <span data-sim="latency gps audio.share">5.49%</span> 多；lag 沒有上界</td></tr>
+            <tr><td>EEVDF v6.6</td><td>不分辨，也不補，照 lag 的帳放回去</td><td>lag ≥ 0 才 eligible；所有 task 的 slice 都一樣</td><td>audio 醒來平均等 <span data-sim="latency eevdf-v6.6 audio.lat">623µs</span></td></tr>
+            <tr class="picked"><td>EEVDF v6.12</td><td>task 自己說：用 <code>sched_attr</code> 宣告 slice</td><td>短 slice 的 deadline 早，再加上 <code>PREEMPT_SHORT</code>、<code>DELAY_DEQUEUE</code></td><td>audio 等 <span data-sim="latency eevdf-v6.12-slice audio.lat">3µs</span>，拿 <span data-sim="latency eevdf-v6.12-slice audio.share">6.15%</span>：睡著時的負 lag 被原諒</td></tr>
+          </tbody>
+        </table>
+        <p>從上往下看，CPU scheduler 越來越不靠猜測來認識 task。O(1) 的問題不在猜得不夠準，而是只要從行為去猜，就有人能照著規則演出來（<a class="chref" data-ref="why-o1"></a>）。CFS 乾脆不猜，每個醒來的 task 都補一樣多，公平因此打了折扣。EEVDF 先把帳算清楚，再讓 task 自己把需求說出來。代價是應用程式得配合：沒有呼叫 <code>sched_setattr()</code> 的 editor，在 v6.12 下平均還是要等 <span data-sim="interactive eevdf-v6.12-slice editor.lat">503µs</span>，和 v6.6 的 <span data-sim="interactive eevdf-v6.6 editor.lat">608µs</span> 差不多（<a href="#/sim/interactive">情境 2</a>）。</p>
+
+        <h2>理論和實作的距離</h2>
+        <p>每一代都可以拿 GPS 量一次離公平有多遠（<a class="chref" data-ref="lag"></a>）。O(n) 和 O(1) 本來就不是照比例分享設計的，在 O(1) 下 nice 差一級的效果，會隨起點的 nice 而變（<a class="chref" data-ref="why-o1"></a>）。CFS 長期的比例很準，但一次跑一整段 <code>sched_slice()</code>，短時間內 lag 擺得大，喚醒補償還讓 interactive task 的 lag 沒有上界。EEVDF 有論文證明的上下界，但 kernel 的實作和論文之間仍有距離：tick 讓 0.75ms 的 slice 變成 1ms、lag 被截斷、重新加入時刻意保留整筆 lag（<a class="chref" data-ref="eevdf"></a>的深入）。</p>
+        <p>這些距離多半是工程上的取捨，不是錯誤。<code>HRTICK</code> 預設關閉，只在 tick 檢查 slice，省下高精度計時器的成本；截斷 lag，是不讓睡了很久的 task 帶著極端的帳回來；保留整筆 lag，則是不想讓帳越算越少。<a class="chref" data-ref="tradeoff"></a>的延遲與吞吐量，也是同一類取捨。</p>
+
+        <h2>之後：sched_ext</h2>
+        <p>v6.12 同時合併了 sched_ext（extensible scheduler class）。它不是另一個演算法，而是一個介面：使用者用 BPF 寫一組 callback，實作 <code>struct sched_ext_ops</code>，在系統執行中載入，就能接手 <code>SCHED_NORMAL</code>、<code>SCHED_BATCH</code>、<code>SCHED_IDLE</code> 與 <code>SCHED_EXT</code> 的 task；設了 <code>SCX_OPS_SWITCH_PARTIAL</code> 時只接手 <code>SCHED_EXT</code> 的。唯一必填的欄位是 <code>ops.name</code>，其他 callback 都可以省略。</p>
+        <p>BPF 排程器和 kernel 之間用 dispatch queue（DSQ）溝通。每顆 CPU 有一個 local DSQ（<code>SCX_DSQ_LOCAL</code>），另外有一個全域的 <code>SCX_DSQ_GLOBAL</code>。task 醒來時先呼叫 <code>ops.select_cpu()</code> 挑 CPU，再呼叫 <code>ops.enqueue()</code>，BPF 程式可以直接把它放進某個 DSQ，也可以先留在自己的資料結構裡。CPU 要找下一個 task 時，先看自己的 local DSQ，再看 global DSQ，都空了才呼叫 <code>ops.dispatch()</code> 補貨。DSQ 預設是 FIFO，改用 <code>scx_bpf_dispatch_vtime()</code> 放進自訂的 DSQ，就成了照 vtime 排序的優先佇列，前面幾章的 vruntime 與 deadline 都能在 BPF 裡重新實作。</p>
+        <p>為了不讓一個寫錯的 BPF 程式拖垮系統，kernel 留了退路：BPF 排程器出錯、有 runnable task 太久沒被排到（watchdog，<code>ops.timeout_ms</code> 沒設定時是 30 秒），或使用者按下 SysRq-S，都會中止 BPF 排程器，所有 task 回到內建的 fair class（文件裡仍稱為 CFS，v6.12 實際上是 EEVDF）。文件也寫明 sched_ext 提供給 BPF 的介面沒有穩定性保證，可能隨版本改變。</p>
+        <p>演進走到這裡，問題從「哪一個演算法最好」變成「讓每個系統換上適合自己的演算法」。本站不實作 sched_ext：它的用武之地在多核、cgroup 與特定的 workload，正好是本站刻意略過的範圍。</p>
+        <p class="fine">sched_ext 的出處：v6.12 的 <code>Documentation/scheduler/sched-ext.rst</code>，watchdog 的預設值見 <code>kernel/sched/ext.c</code> 的 <code>SCX_WATCHDOG_MAX_TIMEOUT</code>（30 × HZ）。</p>
       </article>
 
       <article class="card explain chapter appendix" data-ch="glossary" data-title="名詞速查" data-q="讀到不熟的名詞時回來查">
