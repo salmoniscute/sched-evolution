@@ -1241,7 +1241,7 @@
         </template>
       </article>
 
-      <article class="card explain chapter" data-ch="tradeoff" data-title="延遲與吞吐量的取捨" data-q="切換得越勤，就越好嗎？">
+      <article class="card explain chapter" data-ch="tradeoff" data-title="延遲與吞吐量的取捨" data-q="切換得越勤，就越好嗎？" data-title-en="The latency–throughput trade-off" data-q-en="Is switching more often always better?">
         <p>評估 CPU scheduler 的指標很多（CPU 使用率、throughput、turnaround time、waiting time、response time），它們無法同時做到最好，其中最常見的拉扯是 response time 和 throughput。本站量的「喚醒延遲」，也就是 task 醒來到真正開始執行的時間，屬於 response time。</p>
         <p>拉扯的來源是 context switch 的成本。每次換人，kernel 要保存與載入暫存器、執行一次排程邏輯，這是直接成本；更大的往往是間接成本：新上來的 task 要用的資料不在 cache 裡，TLB 也要重新填，前一小段時間會跑得比較慢。以 Round Robin 為例，設 time slice 是 <span class="tex">q</span>，每次切換的成本是 <span class="tex">c</span>，<span class="tex">n</span> 個 task 輪流執行：</p>
         <div class="tex-block">\text{用在工作上的比例} = \frac{q}{q + c}, \qquad \text{醒來後最久要等} \approx (n - 1)(q + c)</div>
@@ -1272,12 +1272,47 @@
         <details class="deep">
           <summary>深入：sleep 時 lag 怎麼算，為什麼 CFS 和 v6.12 的 audio 多拿</summary>
           <p><a class="chref" data-ref="lag"></a>的 GPS 在 task sleep 時不分 CPU 給它，lag 停在睡前的值，醒來接著算；照這個算法，睡覺不會讓欠帳消失。v6.6 也是這樣做的，睡前把 lag 存進 <code>vlag</code>，醒來放回去。</p>
-          <p>CFS 和 v6.12 在這裡和 GPS 不一樣。CFS 讓剛醒的 task 從 <code>min_vruntime − sched_latency</code> 開始，等於每次醒來都送它一段時間。v6.12 的 <code>DELAY_DEQUEUE</code> 讓 lag 為負的 task 睡著後還留在 runqueue 上，慢慢把負的 lag 還掉，醒來時 lag 大約是 0。從「睡覺時 lag 不變」的角度看，這兩種都等於把欠帳免了，所以圖上它們的 audio、editor 會一路往下。如果改成「睡覺就把負的 lag 清掉」，v6.12 看起來會是公平的。論文對帶著 lag 離開的 task 有幾種處理方式，這部分之後會再對照原文。</p>
+          <p>CFS 和 v6.12 在這裡和 GPS 不一樣。CFS 讓剛醒的 task 從 <code>min_vruntime − sched_latency</code> 開始，等於每次醒來都送它一段時間。v6.12 的 <code>DELAY_DEQUEUE</code> 讓 lag 為負的 task 睡著後還留在 runqueue 上，慢慢把負的 lag 還掉，醒來時 lag 大約是 0。從「睡覺時 lag 不變」的角度看，這兩種都等於把欠帳免了，所以圖上它們的 audio、editor 會一路往下。如果改成「睡覺就把負的 lag 清掉」，v6.12 看起來會是公平的。論文對帶著 lag 離開的 task 有幾種處理方式，見<a class="chref" data-ref="eevdf"></a>的深入「論文的演算法和 kernel 差在哪」。</p>
         </details>
         <p class="fine">模擬器不計 context switch 的成本，切換是瞬間完成的，所以 CPU 比例不會因為切換變多而下降。看模擬結果時，請把 context switch 次數當作吞吐量成本的指標；CPU 比例反映的是公平，不是吞吐量。</p>
+        <template lang="en">
+        <p>There are many metrics for judging a CPU scheduler (CPU utilization, throughput, turnaround time, waiting time, response time), and they cannot all be optimal at once. The most common tension is between response time and throughput. The "wakeup latency" measured on this site, the time from a task waking up to actually starting to run, is a form of response time.</p>
+        <p>The tension comes from the cost of a context switch. Each switch makes the kernel save and load registers and run the scheduling logic once; that is the direct cost. The indirect cost is often larger: the data the incoming task needs is not in the cache, the TLB has to be refilled, and the task runs more slowly for a short while. Take Round Robin with a time slice of <span class="tex">q</span>, a switching cost of <span class="tex">c</span>, and <span class="tex">n</span> tasks taking turns:</p>
+        <div class="tex-block">\text{fraction spent on work} = \frac{q}{q + c}, \qquad \text{longest wait after waking} \approx (n - 1)(q + c)</div>
+        <p>The smaller <span class="tex">q</span>, the sooner a woken task gets its turn, but the more often tasks switch and the larger the fraction spent on <span class="tex">c</span>; a larger <span class="tex">q</span> does the opposite. Suppose <span class="tex">c = 5\,\mu\text{s}</span> and <span class="tex">n = 3</span> (<span class="tex">c</span> is an assumed value just to show the orders of magnitude; real indirect costs vary a lot with the workload):</p>
+        <table class="mini eq-ex">
+          <thead><tr><th><span class="tex">q</span></th><th>fraction spent on work</th><th>longest wait after waking</th></tr></thead>
+          <tbody>
+            <tr><td>0.1 ms</td><td>95.2%</td><td>0.21 ms</td></tr>
+            <tr><td>0.75 ms (EEVDF default slice)</td><td>99.3%</td><td>1.51 ms</td></tr>
+            <tr><td>6.7 ms (CFS sched_slice with three tasks)</td><td>99.93%</td><td>13.4 ms</td></tr>
+          </tbody>
+        </table>
+        <p>But not every task needs the same <span class="tex">q</span>. Ideally a latency-sensitive task runs as soon as it wakes, while CPU-bound tasks run longer at a time to switch less. Much of the difference between generations of CPU schedulers lies in how they recognize which tasks care about latency, or let tasks say so themselves. Results over 2 seconds of the "latency vs. fairness" scenario on the Simulate page:</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>CPU scheduler</th><th>audio's mean wakeup latency</th><th>context switches</th><th>audio's CPU share (fair share <span data-sim="latency gps audio.share">5.49%</span>)</th></tr></thead>
+          <tbody>
+            <tr><td>CFS v2.6.24</td><td><span data-sim="latency cfs-v2.6.24 audio.lat">10 µs</span></td><td><span data-sim="latency cfs-v2.6.24 switches">786</span></td><td><span data-sim="latency cfs-v2.6.24 audio.share">6.06%</span></td></tr>
+            <tr><td>CFS, <code>WAKEUP_PREEMPT</code> off</td><td><span data-sim="latency cfs-v2.6.24 -WAKEUP_PREEMPT audio.lat">1.96 ms</span></td><td><span data-sim="latency cfs-v2.6.24 -WAKEUP_PREEMPT switches">568</span></td><td><span data-sim="latency cfs-v2.6.24 -WAKEUP_PREEMPT audio.share">4.37%</span></td></tr>
+            <tr><td>EEVDF v6.6</td><td><span data-sim="latency eevdf-v6.6 audio.lat">623 µs</span></td><td><span data-sim="latency eevdf-v6.6 switches">1881</span></td><td><span data-sim="latency eevdf-v6.6 audio.share">5.49%</span></td></tr>
+            <tr><td>EEVDF v6.12 (audio's slice 0.3ms)</td><td><span data-sim="latency eevdf-v6.12-slice audio.lat">3 µs</span></td><td><span data-sim="latency eevdf-v6.12-slice switches">2133</span></td><td><span data-sim="latency eevdf-v6.12-slice audio.share">6.15%</span></td></tr>
+          </tbody>
+        </table>
+        <ul>
+          <li>Under CFS, cc runs a whole <code>sched_slice()</code> (about 6.7ms) at a time, so there are the fewest switches, and audio jumps the queue thanks to the wakeup bonus, so its latency is low too. The price is in the last column: audio gets <span data-sim="latency cfs-v2.6.24 audio.share">6.06%</span>, more than its fair share. CFS trades fairness for getting both latency and throughput.</li>
+          <li>EEVDF v6.6 shrinks the slice to 0.75ms, so it switches more than twice as often as CFS, yet audio still waits over 600µs, because everyone's slice is the same and audio's deadline is no earlier. Every task pays the cost of switching without buying the latency audio wants; the upside is that audio gets exactly its fair share.</li>
+          <li>v6.12 lets audio declare a 0.3ms slice itself, bringing latency down to almost 0 at the cost of a few more switches. Why audio's share exceeds its fair share is explained in the last section of <a class="chref" data-ref="slice"></a>; the deeper section below looks at it once more from the GPS point of view.</li>
+        </ul>
+        <details class="deep">
+          <summary>Deeper: how lag is counted during sleep, and why audio takes extra under CFS and v6.12</summary>
+          <p>The GPS of <a class="chref" data-ref="lag"></a> gives a sleeping task no CPU, so its lag stays at its value from before the sleep and continues from there on waking; counted this way, sleeping does not make a debt disappear. v6.6 does the same: it saves the lag in <code>vlag</code> before the task sleeps and puts it back on waking.</p>
+          <p>CFS and v6.12 differ from GPS here. CFS starts a freshly woken task from <code>min_vruntime − sched_latency</code>, which amounts to giving it a chunk of time every time it wakes. v6.12's <code>DELAY_DEQUEUE</code> keeps a task with negative lag on the runqueue after it falls asleep, slowly paying off the negative lag, so it wakes up with lag around 0. From the "lag frozen during sleep" point of view, both amount to writing off the debt, which is why audio and editor keep going down in their charts. If the rule were instead "clear negative lag on sleep", v6.12 would look fair. The paper has several ways of handling a task that leaves with lag; see the deeper section "how the paper's algorithm differs from the kernel" in <a class="chref" data-ref="eevdf"></a>.</p>
+        </details>
+        <p class="fine">The simulator does not charge for context switches: a switch is instantaneous, so the CPU shares do not drop as switches increase. When reading simulation results, treat the number of context switches as the indicator of throughput cost; the CPU share reflects fairness, not throughput.</p>
+        </template>
       </article>
 
-      <article class="card explain chapter" data-ch="recap" data-title="回顧：各代怎麼回答公平與延遲" data-q="同一個問題，各代的答案差在哪？">
+      <article class="card explain chapter" data-ch="recap" data-title="回顧：各代怎麼回答公平與延遲" data-q="同一個問題，各代的答案差在哪？" data-title-en="Recap: how each generation answers fairness and latency" data-q-en="Same question, so how do the answers differ?">
         <p><a class="chref" data-ref="problem"></a>開頭的問題是：只有一顆 CPU，該讓誰先執行？拆開來其實是兩個問題，長期下來每個 task 該分到多少（公平），以及醒來之後多快輪到它（延遲）。這一章把各代的答案放在一起看。</p>
 
         <h2>挑選規則，一行就寫得完</h2>
@@ -1308,11 +1343,47 @@
         <p>為了不讓一個寫錯的 BPF 程式拖垮系統，kernel 留了退路：BPF 排程器出錯、有 runnable task 太久沒被排到（watchdog，<code>ops.timeout_ms</code> 沒設定時是 30 秒），或使用者按下 SysRq-S，都會中止 BPF 排程器，所有 task 回到內建的 fair class（文件裡仍稱為 CFS，v6.12 實際上是 EEVDF）。文件也寫明 sched_ext 提供給 BPF 的介面沒有穩定性保證，可能隨版本改變。</p>
         <p>演進走到這裡，問題從「哪一個演算法最好」變成「讓每個系統換上適合自己的演算法」。本站不實作 sched_ext：它的用武之地在多核、cgroup 與特定的 workload，正好是本站刻意略過的範圍。</p>
         <p class="fine">sched_ext 的出處：v6.12 的 <code>Documentation/scheduler/sched-ext.rst</code>，watchdog 的預設值見 <code>kernel/sched/ext.c</code> 的 <code>SCX_WATCHDOG_MAX_TIMEOUT</code>（30 × HZ）。</p>
+        <template lang="en">
+        <p>The question at the start of <a class="chref" data-ref="problem"></a> was: with only one CPU, who should run first? Taken apart, it is really two questions: how much each task should get in the long run (fairness), and how soon it gets its turn after waking (latency). This chapter puts the answers of each generation side by side.</p>
+
+        <h2>Picking rules fit on one line</h2>
+        <p>Each generation's rule for picking the next task is short; what differs is what it compares:</p>
+        <div class="tex-block">\begin{aligned} \text{2.4: }\; & \max_i \; \text{goodness}_i = \text{counter}_i + 20 - \text{nice}_i \\ \text{2.6.0: }\; & \min_i \; \text{prio}_i = \texttt{static\_prio}_i - \text{bonus}_i \\ \text{CFS: }\; & \min_i \; v_i, \qquad v_i \mathrel{+}= \Delta t \cdot \tfrac{1024}{w_i} \\ \text{EEVDF: }\; & \min_{v_i \le V} \; d_i, \qquad d_i = v_i + r_i \cdot \tfrac{1024}{w_i} \end{aligned}</div>
+        <p>2.4 and 2.6.0 mix "how much" and "how soon" into one number: goodness and prio decide who runs first, while the length of the time slice decides the proportions. CFS keeps only fairness: keeping <span class="tex">v_i</span> level is dividing by weight (<a class="chref" data-ref="cfs"></a>), and latency has no parameter of its own, relying on the bonus at wakeup. EEVDF adds a second parameter <span class="tex">r_i</span>: <span class="tex">w_i</span> decides how much a task gets in the long run and <span class="tex">r_i</span> how early its deadline is, so the two are finally separate.</p>
+
+        <h2>Who cares about latency: from guessing to telling</h2>
+        <table class="mini eq-ex wrap">
+          <thead><tr><th></th><th>How it knows who cares about latency</th><th>What it gives them</th><th>The price measured on this site</th></tr></thead>
+          <tbody>
+            <tr><td>O(n) 2.4</td><td>It does not tell them apart. A task asleep during recalculation keeps half of its unused counter</td><td>Higher goodness, so it can jump the queue on waking</td><td>Every pick walks the whole runqueue (<a class="chref" data-ref="o1"></a>)</td></tr>
+            <tr><td>O(1) 2.6.0</td><td>It guesses: the higher <code>sleep_avg</code>, the more interactive</td><td>Up to +5 priority, and staying in this round after the time slice runs out</td><td>cheat, running 2.3ms and sleeping 0.83ms, takes <span data-sim="cheat o1-v2.6.0 cheat.share">67.0%</span> against a fair share of <span data-sim="cheat gps cheat.share">29.8%</span></td></tr>
+            <tr><td>CFS v2.6.24</td><td>It does not tell them apart; every waking task gets the bonus</td><td>Placed at <code>min_vruntime</code> − <code>sched_latency</code>, usually preempting right away</td><td>audio takes <span data-sim="latency cfs-v2.6.24 audio.share">6.06%</span>, more than its fair share of <span data-sim="latency gps audio.share">5.49%</span>; lag has no upper bound</td></tr>
+            <tr><td>EEVDF v6.6</td><td>It does not tell them apart and gives no bonus; tasks are placed back by their lag</td><td>Eligible only with lag ≥ 0; every task has the same slice</td><td>audio waits <span data-sim="latency eevdf-v6.6 audio.lat">623µs</span> on average after waking</td></tr>
+            <tr class="picked"><td>EEVDF v6.12</td><td>The task says so itself, declaring a slice through <code>sched_attr</code></td><td>A short slice means an early deadline, plus <code>PREEMPT_SHORT</code> and <code>DELAY_DEQUEUE</code></td><td>audio waits <span data-sim="latency eevdf-v6.12-slice audio.lat">3µs</span> and takes <span data-sim="latency eevdf-v6.12-slice audio.share">6.15%</span>: negative lag during sleep is forgiven</td></tr>
+          </tbody>
+        </table>
+        <p>Reading down the table, the CPU scheduler relies less and less on guessing to get to know its tasks. The problem with O(1) is not that its guesses were not accurate enough, but that as long as it guesses from behaviour, someone can act out the rules (<a class="chref" data-ref="why-o1"></a>). CFS stops guessing and gives every waking task the same bonus, and fairness suffers for it. EEVDF first keeps the books straight, then lets tasks state their needs themselves. The price is that applications have to cooperate: an editor that does not call <code>sched_setattr()</code> still waits <span data-sim="interactive eevdf-v6.12-slice editor.lat">503µs</span> on average under v6.12, about the same as <span data-sim="interactive eevdf-v6.6 editor.lat">608µs</span> under v6.6 (<a href="#/sim/interactive">scenario 2</a>).</p>
+
+        <h2>The distance between theory and implementation</h2>
+        <p>For every generation you can use GPS to measure how far it is from fair (<a class="chref" data-ref="lag"></a>). O(n) and O(1) were never designed for proportional sharing, and under O(1) the effect of one nice level depends on which nice value you start from (<a class="chref" data-ref="why-o1"></a>). CFS gets the long-run proportions very accurately, but it runs a whole <code>sched_slice()</code> at a time, so lag swings widely over short periods, and the wakeup bonus leaves the lag of interactive tasks unbounded. EEVDF has bounds proven in the paper, but the kernel implementation still differs from the paper: the tick turns a 0.75ms slice into 1ms, lag is truncated, and on rejoining the full lag is deliberately kept (the deeper sections of <a class="chref" data-ref="eevdf"></a>).</p>
+        <p>These distances are mostly engineering trade-offs, not mistakes. <code>HRTICK</code> is off by default and slices are only checked at the tick, saving the cost of a high-resolution timer; truncating lag keeps a task that slept a long time from coming back with extreme numbers on its books; keeping the full lag avoids the books shrinking over time. The latency versus throughput of <a class="chref" data-ref="tradeoff"></a> is the same kind of trade-off.</p>
+
+        <h2>What comes next: sched_ext</h2>
+        <p>v6.12 also merged sched_ext (the extensible scheduler class). It is not another algorithm but an interface: users write a set of callbacks in BPF implementing <code>struct sched_ext_ops</code>, load it while the system is running, and it takes over tasks of <code>SCHED_NORMAL</code>, <code>SCHED_BATCH</code>, <code>SCHED_IDLE</code> and <code>SCHED_EXT</code>; with <code>SCX_OPS_SWITCH_PARTIAL</code> set it takes over only the <code>SCHED_EXT</code> ones. The only required field is <code>ops.name</code>; all other callbacks can be left out.</p>
+        <p>The BPF scheduler and the kernel communicate through dispatch queues (DSQs). Each CPU has a local DSQ (<code>SCX_DSQ_LOCAL</code>), and there is also a global <code>SCX_DSQ_GLOBAL</code>. When a task wakes up, <code>ops.select_cpu()</code> is called first to choose a CPU, then <code>ops.enqueue()</code>; the BPF program can put the task straight into a DSQ, or keep it in its own data structures for now. When a CPU needs its next task, it looks at its local DSQ first, then the global DSQ, and only when both are empty calls <code>ops.dispatch()</code> to refill. DSQs are FIFO by default; putting tasks into a custom DSQ with <code>scx_bpf_dispatch_vtime()</code> turns it into a priority queue ordered by vtime, so the vruntime and deadlines of the earlier chapters can all be reimplemented in BPF.</p>
+        <p>So that a buggy BPF program cannot bring the system down, the kernel keeps a way back: if the BPF scheduler hits an error, if a runnable task goes unscheduled for too long (the watchdog, 30 seconds when <code>ops.timeout_ms</code> is not set), or if the user presses SysRq-S, the BPF scheduler is aborted and all tasks return to the built-in fair class (still called CFS in the documentation, though in v6.12 it is actually EEVDF). The documentation also states that the interface sched_ext offers to BPF has no stability guarantees and may change between releases.</p>
+        <p>At this point in the evolution, the question changes from "which algorithm is best" to "letting each system switch to the algorithm that suits it". This site does not implement sched_ext: where it shines is multiple cores, cgroups and specific workloads, exactly the range this site deliberately leaves out.</p>
+        <p class="fine">Sources for sched_ext: <code>Documentation/scheduler/sched-ext.rst</code> in v6.12; for the watchdog default, see <code>SCX_WATCHDOG_MAX_TIMEOUT</code> (30 × HZ) in <code>kernel/sched/ext.c</code>.</p>
+        </template>
       </article>
 
-      <article class="card explain chapter appendix" data-ch="glossary" data-title="名詞速查" data-q="讀到不熟的名詞時回來查">
+      <article class="card explain chapter appendix" data-ch="glossary" data-title="名詞速查" data-q="讀到不熟的名詞時回來查" data-title-en="Glossary" data-q-en="Come back here when you meet an unfamiliar term">
         <p>正文裡加了虛線底線的名詞，滑鼠移上去也會顯示同樣的定義。</p>
         <div id="glossary"></div>
+        <template lang="en">
+        <p>Terms with a dotted underline in the text show the same definition when you hover over them.</p>
+        <div id="glossary"></div>
+        </template>
       </article>
 
         </div>

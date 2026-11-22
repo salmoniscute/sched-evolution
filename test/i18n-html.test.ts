@@ -13,11 +13,6 @@ const where = (s: string) => {
   return i < 0 ? '' : `…${s.slice(Math.max(0, i - 60), i + 30)}…`;
 };
 
-/** 還沒翻的章節（翻完一章就從這裡拿掉） */
-const PENDING = new Set<string>([
-  'tradeoff', 'recap', 'glossary',
-]);
-
 interface Article {
   name: string;
   open: string;
@@ -55,7 +50,7 @@ test('找得到介紹頁和每一章', () => {
   expect(articles.length).toBe(14);
 });
 
-describe.each(articles.filter((a) => !PENDING.has(a.name)).map((a) => [a.name, a] as const))('%s', (_, a) => {
+describe.each(articles.map((a) => [a.name, a] as const))('%s', (_, a) => {
   test('有英文版，而且沒有中文', () => {
     expect(a.en, '缺 <template lang="en">').not.toBeNull();
     expect(where(a.en!)).toBe('');
@@ -70,10 +65,6 @@ describe.each(articles.filter((a) => !PENDING.has(a.name)).map((a) => [a.name, a
       expect(t && q, '缺 data-title-en / data-q-en').toBeTruthy();
       expect(where(t! + q!)).toBe('');
     });
-});
-
-test('PENDING 裡的章節真的還沒翻（翻完要從清單拿掉）', () => {
-  for (const a of articles) if (PENDING.has(a.name)) expect(a.en, a.name).toBeNull();
 });
 
 test('內文以外的固定文字都有 data-en', () => {
