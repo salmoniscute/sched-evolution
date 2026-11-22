@@ -4,6 +4,7 @@
 import { Simulator } from '../core/engine.ts';
 import { summarize } from '../core/metrics.ts';
 import { NSEC_PER_SEC, NSEC_PER_USEC } from '../core/types.ts';
+import { tr } from '../i18n.ts';
 import { scenarios } from '../scenarios.ts';
 import { variants, type Flags } from '../variants.ts';
 
@@ -15,7 +16,7 @@ const BASE = 0.75; // sysctl_sched_base_slice
 
 type Key = 'custom_slice' | 'DELAY_DEQUEUE' | 'PREEMPT_SHORT';
 const LABEL: Record<Key, string> = {
-  custom_slice: 'audio 要求 0.3ms 的 slice（custom_slice）',
+  custom_slice: tr('audio 要求 0.3ms 的 slice（custom_slice）', 'audio asks for a 0.3ms slice (custom_slice)'),
   DELAY_DEQUEUE: 'DELAY_DEQUEUE',
   PREEMPT_SHORT: 'PREEMPT_SHORT',
 };
@@ -101,36 +102,63 @@ function sliceWidget(box: HTMLElement): void {
     const yTicks = [0.2, 0, -0.2]
       .map((l) => `<line class="dg-grid" x1="${X0}" x2="${X1}" y1="${y(l)}" y2="${y(l)}"/><text class="dg-s" x="${X0 - 6}" y="${y(l) + 4}" text-anchor="end">${l > 0 ? '+' : l < 0 ? '−' : ''}${Math.abs(l).toFixed(1)}</text>`)
       .join('');
-    svgBox.innerHTML = `<svg viewBox="0 0 640 236" role="img" aria-label="audio 一個週期內的 lag">
+    svgBox.innerHTML = `<svg viewBox="0 0 640 236" role="img" aria-label="${tr('audio 一個週期內的 lag', 'Lag of audio over one period')}">
       <rect class="dg-elig" x="${X0}" y="${y(LMAX)}" width="${X1 - X0}" height="${y(0) - y(LMAX)}"/>
-      <text class="dg-s" x="${X0 + 6}" y="${y(LMAX) + 13}">eligible（lag ≥ 0）</text>
+      <text class="dg-s" x="${X0 + 6}" y="${y(LMAX) + 13}">${tr('eligible（lag ≥ 0）', 'eligible (lag ≥ 0)')}</text>
       ${yTicks}
-      <text class="dg-s" x="${X0 - 50}" y="${Y0 - 14}">audio 的 lag（ms）</text>
+      <text class="dg-s" x="${X0 - 50}" y="${Y0 - 14}">${tr('audio 的 lag（ms）', 'lag of audio (ms)')}</text>
       <line class="dg-axis" x1="${X0}" x2="${X0}" y1="${Y0}" y2="${Y1}"/>
       <polyline class="dg-lag s1" points="${line}"/>
       <circle class="dg-dot s1" cx="${x(0)}" cy="${y(wakeLag)}" r="4"/>
-      <text class="dg-s" x="${x(0) + 6}" y="${y(wakeLag) + (wakeLag < 0 ? 16 : -8)}">醒來</text>
-      ${band(0, wait, 'wait', wait ? `排隊 ${(wait * 1000).toFixed(0)}µs` : '')}
-      ${band(wait, wait + RUN, 'run', '跑 0.31ms')}
-      ${band(wait + RUN, tEnd, '', burn ? `睡著，前 ${(burn * 1000).toFixed(0)}µs 還留在佇列上` : '睡著，lag 停住')}
-      <text class="dg-s" x="${X1 + 6}" y="${y(endLag) + 4}">… 睡到 ${SLEEP}ms</text>
+      <text class="dg-s" x="${x(0) + 6}" y="${y(wakeLag) + (wakeLag < 0 ? 16 : -8)}">${tr('醒來', 'wakes')}</text>
+      ${band(0, wait, 'wait', wait ? tr(`排隊 ${(wait * 1000).toFixed(0)}µs`, `waits ${(wait * 1000).toFixed(0)}µs`) : '')}
+      ${band(wait, wait + RUN, 'run', tr('跑 0.31ms', 'runs 0.31ms'))}
+      ${band(wait + RUN, tEnd, '', burn
+          ? tr(`睡著，前 ${(burn * 1000).toFixed(0)}µs 還留在佇列上`, `asleep, still on the runqueue for the first ${(burn * 1000).toFixed(0)}µs`)
+          : tr('睡著，lag 停住', 'asleep, lag frozen'))}
+      <text class="dg-s" x="${X1 + 6}" y="${y(endLag) + 4}">${tr(`… 睡到 ${SLEEP}ms`, `… sleeps to ${SLEEP}ms`)}</text>
     </svg>`;
 
+    const lagTxt = wakeLag >= 0 ? '0' : `−${drop.toFixed(2)}ms`;
     const mark = (ok: boolean) => `<span class="${ok ? 'ok' : 'no'}">${ok ? '✓' : '✗'}</span>`;
     conds.innerHTML = [
-      [on.PREEMPT_SHORT, '<code>PREEMPT_SHORT</code> 開著'],
-      [short, `audio 的 slice 比正在跑的 cc 短（${short ? SHORT : BASE} ${short ? '&lt;' : '='} ${BASE}ms）`],
-      [eligible, `audio 醒來時 eligible（lag ${wakeLag >= 0 ? '0' : `−${drop.toFixed(2)}ms`}）`],
+      [on.PREEMPT_SHORT, tr('<code>PREEMPT_SHORT</code> 開著', '<code>PREEMPT_SHORT</code> is on')],
+      [
+        short,
+        tr(
+          `audio 的 slice 比正在跑的 cc 短（${short ? SHORT : BASE} ${short ? '&lt;' : '='} ${BASE}ms）`,
+          `audio's slice is shorter than that of the running cc (${short ? SHORT : BASE} ${short ? '&lt;' : '='} ${BASE}ms)`,
+        ),
+      ],
+      [eligible, tr(`audio 醒來時 eligible（lag ${lagTxt}）`, `audio is eligible on waking (lag ${lagTxt})`)],
     ]
       .map(([ok, t]) => `<li>${mark(ok as boolean)} ${t}</li>`)
       .join('');
 
+    const waitUs = (wait * 1000).toFixed(0);
     out.textContent = preempt
-      ? '三個條件都成立：audio 一醒來就取消 cc「跑完這個 slice」的保護，馬上上 CPU。它睡前多拿的那 0.21ms，在剛睡著的那段時間已經還清了。'
+      ? tr(
+          '三個條件都成立：audio 一醒來就取消 cc「跑完這個 slice」的保護，馬上上 CPU。它睡前多拿的那 0.21ms，在剛睡著的那段時間已經還清了。',
+          'All three conditions hold: as soon as audio wakes up it cancels the "finish this slice" protection of cc and gets the CPU right away. The 0.21ms it took in excess before sleeping was paid off early in its sleep.',
+        )
       : !eligible
-        ? `audio 帶著 −${drop.toFixed(2)}ms 的 lag 醒來，還不 eligible，slice 再短也選不到它。只能等其他 task 跑，lag 以 1/3 的速度爬回 0，要 ${(wait * 1000).toFixed(0)}µs。`
-        : `audio 醒來時 eligible，但${!short ? ' slice 和 cc 一樣長，deadline 不會比較早' : '沒有 PREEMPT_SHORT，cc 的 RUN_TO_PARITY 保護擋著'}，得等 cc 把這次的 slice 跑完。`;
-    tally.textContent = `模擬核心跑情境 4 兩秒（EEVDF v6.12，其他開關預設）：audio 平均喚醒延遲 ${m.avg.toFixed(0)}µs，p99 ${m.p99.toFixed(0)}µs，CPU 比例 ${(m.share * 100).toFixed(2)}%（公平的份 5.49%），context switch ${m.nr} 次。`;
+        ? tr(
+            `audio 帶著 −${drop.toFixed(2)}ms 的 lag 醒來，還不 eligible，slice 再短也選不到它。只能等其他 task 跑，lag 以 1/3 的速度爬回 0，要 ${waitUs}µs。`,
+            `audio wakes up with a lag of −${drop.toFixed(2)}ms and is not yet eligible, so it cannot be picked however short its slice. It has to wait while the other tasks run, its lag climbing back to 0 at rate 1/3, which takes ${waitUs}µs.`,
+          )
+        : !short
+          ? tr(
+              'audio 醒來時 eligible，但 slice 和 cc 一樣長，deadline 不會比較早，得等 cc 把這次的 slice 跑完。',
+              'audio is eligible on waking, but its slice is as long as that of cc, so its deadline is no earlier, and it has to wait for cc to finish its current slice.',
+            )
+          : tr(
+              'audio 醒來時 eligible，但沒有 PREEMPT_SHORT，cc 的 RUN_TO_PARITY 保護擋著，得等 cc 把這次的 slice 跑完。',
+              'audio is eligible on waking, but without PREEMPT_SHORT the RUN_TO_PARITY protection of cc is in the way, so it has to wait for cc to finish its current slice.',
+            );
+    tally.textContent = tr(
+      `模擬核心跑情境 4 兩秒（EEVDF v6.12，其他開關預設）：audio 平均喚醒延遲 ${m.avg.toFixed(0)}µs，p99 ${m.p99.toFixed(0)}µs，CPU 比例 ${(m.share * 100).toFixed(2)}%（公平的份 5.49%），context switch ${m.nr} 次。`,
+      `Simulator, scenario 4 for two seconds (EEVDF v6.12, other switches at defaults): audio's mean wakeup latency ${m.avg.toFixed(0)}µs, p99 ${m.p99.toFixed(0)}µs, CPU share ${(m.share * 100).toFixed(2)}% (fair share 5.49%), ${m.nr} context switches.`,
+    );
   };
   render();
 }

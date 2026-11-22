@@ -872,7 +872,7 @@
         </template>
       </article>
 
-      <article class="card explain chapter" data-ch="eevdf" data-title="EEVDF：先看 eligible，再比 deadline" data-q="公平和延遲，能不能分開處理？">
+      <article class="card explain chapter" data-ch="eevdf" data-title="EEVDF：先看 eligible，再比 deadline" data-q="公平和延遲，能不能分開處理？" data-title-en="EEVDF: eligibility first, then deadlines" data-q-en="Can fairness and latency be handled separately?">
         <p>CFS 用一個 vruntime 同時處理公平與延遲，但這兩者其實是不同的需求。v6.6 引入的 EEVDF 把它們拆開：公平交給 lag，延遲交給 deadline。它同樣使用 vruntime，先看 lag 怎麼從 vruntime 算出來。</p>
         <h2>從 lag 到 V</h2>
         <p><a class="chref" data-ref="lag"></a>的 lag 是 <span class="tex">S_i - s_i</span>，兩個量都是 CPU 時間。把它們換成和 vruntime 一樣的單位，就能直接比較。task 實際拿到的時間 <span class="tex">s_i</span> 換算之後就是 vruntime（<span class="tex">\Delta v_i = \Delta t \times 1024 / w_i</span>）：</p>
@@ -964,9 +964,102 @@
 
         <h2>v6.6 還做不到的事</h2>
         <p>v6.6 所有 task 的 slice 都固定為 <code>sysctl_sched_base_slice</code>（0.75ms），deadline 拉不開，CPU scheduler 無從得知誰比較急。再加上 lag 會原樣帶回，剛執行完一段就去 sleep 的 task，醒來時多半帶著負的 lag，不 eligible，還得再等一下。這兩件事合起來，就是 v6.12 要解決的問題（<a class="chref" data-ref="slice"></a>）。</p>
+        <template lang="en">
+        <p>CFS uses one vruntime to handle both fairness and latency, but they are really different needs. EEVDF, introduced in v6.6, separates them: fairness goes to lag, latency goes to the deadline. It uses vruntime too, so let us first see how lag is computed from vruntime.</p>
+        <h2>From lag to V</h2>
+        <p>The lag in <a class="chref" data-ref="lag"></a> is <span class="tex">S_i - s_i</span>, and both quantities are CPU time. Converting them to the same unit as vruntime lets us compare them directly. The time a task actually received, <span class="tex">s_i</span>, converts straight into its vruntime (<span class="tex">\Delta v_i = \Delta t \times 1024 / w_i</span>):</p>
+        <div class="tex-block">s_i = \frac{w_i}{1024}\, v_i</div>
+        <p>The same goes for GPS. GPS has every runnable task receive CPU at rate <span class="tex">w_i / W</span> at the same time; converted to vruntime, they all advance at the same rate <span class="tex">1024 / W</span>. Call this common vruntime <span class="tex">V</span> (virtual time); the time GPS should have given is then</p>
+        <div class="tex-block">S_i = \frac{w_i}{1024}\, V</div>
+        <p>Subtracting the two, lag comes down to the difference between <span class="tex">V</span> and <span class="tex">v_i</span>:</p>
+        <div class="tex-block">\text{lag}_i = S_i - s_i = \frac{w_i}{1024}\,(V - v_i)</div>
+        <p>So the sign of the lag depends only on which side of <span class="tex">V</span> the task's vruntime is: to the left means it is owed, to the right means it has taken extra. A task with lag ≥ 0 is called eligible, and only eligible tasks can be picked:</p>
+        <div class="tex-block">\text{lag}_i \ge 0 \quad\Longleftrightarrow\quad v_i \le V</div>
+        <p>What remains is how to find <span class="tex">V</span>. The kernel does not run a separate GPS; it uses the fact shown in <a class="chref" data-ref="lag"></a> that "all lags add up to 0":</p>
+        <div class="tex-block">\sum_j w_j\,(V - v_j) = 0 \quad\Longrightarrow\quad V = \frac{\sum_j w_j\, v_j}{\sum_j w_j}</div>
+        <p>That is, the weighted average of the vruntimes of all runnable tasks, computed by <code>avg_vruntime()</code>.</p>
+        <h2>Deadlines: who goes first among the eligible</h2>
+        <p>The second quantity is the deadline. The slice is how long a task wants to run in one go, and the deadline is the vruntime plus the slice converted to virtual time, the same way vruntime is converted:</p>
+        <div class="tex-block">d_i = v_i + \text{slice}_i \times \frac{1024}{w_i}</div>
+        <p>The picking rule is: among the eligible tasks, pick the one with the earliest deadline.</p>
+        <div class="tex-block">\text{pick} = \mathop{\arg\min}_{i \,:\, v_i \le V} \; d_i</div>
+        <p>Plug in the defaults from the chart below. All three tasks are nice 0, so <span class="tex">1024 / w_i = 1</span> and <span class="tex">V</span> is just the average vruntime:</p>
+        <div class="tex-block">V = \frac{-0.30 + 0.35 - 0.05}{3} = 0</div>
+        <table class="mini eq-ex">
+          <thead><tr><th>task</th><th><span class="tex">v_i</span></th><th>eligible (<span class="tex">v_i \le V</span>)</th><th><span class="tex">\text{slice}_i</span></th><th><span class="tex">d_i</span></th></tr></thead>
+          <tbody>
+            <tr><td>A</td><td>−0.30</td><td>yes</td><td>0.75</td><td>0.45</td></tr>
+            <tr><td>B</td><td>+0.35</td><td>no</td><td>0.75</td><td>1.10</td></tr>
+            <tr class="picked"><td>C</td><td>−0.05</td><td>yes</td><td>0.30</td><td>0.25 (earliest, picked)</td></tr>
+          </tbody>
+        </table>
+        <p>All values are in ms. A and C are eligible, and of these C has the earliest deadline, so C is picked. B is not eligible, so however early its deadline, it will not be picked.</p>
+        <div class="widget" id="w-eevdf"></div>
+        <p class="try">Drag C's slice above 0.5ms and the pick switches to A. Drag B's slice to the minimum and B still cannot be picked, because it is not eligible. Then press "Let the picked task run its slice" several times: C, with the short slice, gets more turns, but runs only a short stretch each time.</p>
+        <p>In other words, lag decides whether a task is entitled to run (fairness), and the deadline decides the order among eligible tasks (latency).</p>
+        <p class="fine">Simplifications: all three tasks are nice 0, so V is simply the average vruntime. Changing a slice recomputes the deadline immediately; the real kernel only updates it at the next request.</p>
+        <details class="deep">
+          <summary>Deeper: when the kernel's V differs from the GPS V</summary>
+          <p>The comment in v6.6 <code>kernel/sched/fair.c</code> writes</p>
+          <div class="tex-block">\text{lag}_i = S - s_i = w_i \cdot (V - v_i)</div>
+          <p>It treats the weight as a plain proportion without dividing by 1024, so the unit is "weight × time"; dividing by the nice 0 weight of 1024 gives time again, which is the unit in this site's charts. Whichever unit is used, the sign depends only on <span class="tex">V - v_i</span>.</p>
+          <p>Computing <span class="tex">V</span> as a weighted average above assumes that the lags of all tasks on the runqueue add up to exactly 0. When a task joins or leaves with a non-zero lag, the sum is no longer 0, and the weighted average drifts apart from the true GPS <span class="tex">V</span>. The comment says so itself: the two are equal only if tasks join and leave at lag = 0. The lag on the Simulate page is a separate GPS computed from the definition, not the kernel's <code>vlag</code>, so it can be used to check how far the kernel's approximation is off.</p>
+        </details>
+
+        <h2>Finishing a slice: <code>update_deadline()</code></h2>
+        <p>The picked task keeps running and its vruntime moves right. When it reaches the deadline, the slice it asked for is used up, and <code>update_deadline()</code> gives it the next deadline and asks for a new pick:</p>
+        <div class="tex-block">v_i \ge d_i \quad\Longrightarrow\quad d_i \leftarrow v_i + \text{slice}_i \times \frac{1024}{w_i}</div>
+        <p>A task that always has work to do thus gets a new deadline every 0.75ms. At the same time its vruntime moves past <span class="tex">V</span>, so it becomes ineligible and gives way to other tasks.</p>
+
+        <h2>Where a waking task goes: <code>place_entity()</code></h2>
+        <p>CFS always places a waking task near <code>min_vruntime</code> − 20ms (<a class="chref" data-ref="cfs"></a>), whether it was owed or had taken extra before sleeping. EEVDF goes by the books instead: when a task leaves the runqueue, <code>update_entity_lag()</code> records its lag (<code>vlag</code>, in vruntime units); when it comes back, <code>place_entity()</code> puts it the same distance to the left of <span class="tex">V</span> and computes its deadline from there. This is the <code>PLACE_LAG</code> sched_feat:</p>
+        <div class="tex-block">\texttt{vlag} = V - v_i \;\;\text{(on leaving)}, \qquad v_i \leftarrow V - \texttt{vlag},\quad d_i \leftarrow v_i + \text{slice}_i \times \frac{1024}{w_i} \;\;\text{(on returning)}</div>
+        <p>Sleeping neither makes a debt owed to the task disappear nor writes off what it took in excess. There are two details here.</p>
+        <p>First, <code>vlag</code> has limits. With nice 0, a 0.75ms slice and a 1ms tick, the limit is 1.5ms:</p>
+        <div class="tex-block">\texttt{vlag} \leftarrow \operatorname{clamp}\bigl(V - v_i,\; -L,\; L\bigr), \qquad L = \max(2 \times \text{slice},\; \text{TICK}) \times \frac{1024}{w_i}</div>
+        <p>However much a task is owed, it brings back at most 1.5ms. In the paper the lag bounds are a proven property (see the deeper section below); the kernel simply truncates, so that no task comes back with an extreme lag.</p>
+        <p>Second, a task joining pulls <span class="tex">V</span> along. <span class="tex">V</span> is a weighted average, so adding a task to the left of <span class="tex">V</span> moves the average left and shrinks that task's lag. So <code>place_entity()</code> first scales the lag up and then places the task:</p>
+        <div class="tex-block">v_i \leftarrow V - \texttt{vlag} \times \frac{W + w_i}{W}</div>
+        <p><span class="tex">W</span> is the total weight on the runqueue before the task joins. An example: cc1 and cc2 are on the runqueue (<span class="tex">W = 2048</span>), and audio (<span class="tex">w = 1024</span>) comes back with <span class="tex">\texttt{vlag} = +0.3</span>.</p>
+        <table class="mini eq-ex">
+          <thead><tr><th></th><th>placed at</th><th><span class="tex">V'</span> after joining</th><th>audio's lag</th></tr></thead>
+          <tbody>
+            <tr><td>placed as is</td><td><span class="tex">V - 0.3</span></td><td><span class="tex">V - \frac{1024 \times 0.3}{3072} = V - 0.1</span></td><td>0.2 (shrunk)</td></tr>
+            <tr class="picked"><td>scaled first</td><td><span class="tex">V - 0.3 \times \frac{3072}{2048} = V - 0.45</span></td><td><span class="tex">V - \frac{1024 \times 0.45}{3072} = V - 0.15</span></td><td>0.3 (same as on leaving)</td></tr>
+          </tbody>
+        </table>
+        <details class="deep">
+          <summary>Deeper: how far lag can stray, and the paper's bounds</summary>
+          <p>EEVDF lets a task run a slice at a time, so the height of the lag sawtooth is set by the slice (<a class="chref" data-ref="lag"></a>: running <span class="tex">q</span> in a row lowers the lag by <span class="tex">q\,(1 - w_i/W)</span>). The paper by Stoica and Abdel-Wahab proves that the bounds on lag depend on the request size:</p>
+          <div class="tex-block">-r_{\max} \;&lt;\; \text{lag}_i \;&lt;\; \max(r_{\max},\, q)</div>
+          <p><span class="tex">r_{\max}</span> is the largest request (the length asked for in one go, that is, the slice), and <span class="tex">q</span> is the scheduling time unit. In the simulation the 0.75ms slice is stretched to 1ms by the 1ms tick (whether it is used up is only checked at the tick), and the measured lags all stay within ±1ms, consistent with these bounds. Two nice 0 hogs under CFS v2.6.24 run a whole <code>sched_slice()</code> at a time (about 10ms), and their lag swings by more than 5ms; under EEVDF it swings by only about 0.5ms.</p>
+        </details>
+        <details class="deep">
+          <summary>Deeper: how the paper's algorithm differs from the kernel</summary>
+          <p>The paper by Stoica and Abdel-Wahab defines an ideal algorithm: <span class="tex">V</span> accumulates exactly as <span class="tex">dV/dt = 1/W</span>; each task has a request that starts at a virtual eligible time <span class="tex">v_e</span> and ends at a virtual deadline <span class="tex">v_d = v_e + r/w</span>; each quantum <span class="tex">q</span> goes to the eligible request (<span class="tex">v_e \le V</span>) with the earliest <span class="tex">v_d</span>. When tasks leave and join, the paper adjusts <span class="tex">V</span> with two formulas:</p>
+          <div class="tex-block">\text{leave: }\; V \leftarrow V + \frac{\text{lag}_j}{\sum_{\text{after leaving}} w_i}, \qquad \text{join: }\; V \leftarrow V - \frac{\text{lag}_j}{\sum_{\text{after joining}} w_i}</div>
+          <p>These two formulas keep the sum of all lags at 0, that is <span class="tex">\sum w_i (V - v_i) = 0</span>, and rearranging gives <span class="tex">V = \sum w_i v_i / W</span>. So with exact arithmetic the paper's <span class="tex">V</span> and the kernel's <code>avg_vruntime()</code> are the same quantity; the kernel just computes the weighted average directly, plus the truncation of integer arithmetic.</p>
+          <p>The denominator of the join formula includes the joining task itself, so a task coming back with lag <span class="tex">\ell</span> bears a share of it and actually brings back only <span class="tex">\ell \cdot W/(W + w_i)</span>. The "placed as is" row in the table above is the paper's result; the kernel's <code>place_entity()</code> deliberately scales by <span class="tex">(W + w_i)/W</span> to make up that share, and the comment gives the reason as “otherwise lag can quickly evaporate”. Take scenario 4: audio goes to sleep with a lag of about −0.21ms each time. The paper brings back only two thirds, so on waking it waits at most <span data-sim="latency eevdf-paper audio.max">420µs</span> (<span class="tex">0.14 \div \tfrac{1}{3}</span>); kernel v6.6 brings back all of it, and audio waits <span data-sim="latency eevdf-v6.6 audio.lat">623µs</span> on average.</p>
+          <table class="mini eq-ex wrap">
+            <thead><tr><th></th><th>Paper</th><th>Kernel (v6.6 / v6.12)</th></tr></thead>
+            <tbody>
+              <tr><td>When to pick again</td><td>When a quantum expires, a request is used up, or a task leaves; a waking task waits for the current quantum to end</td><td>At the tick, check whether the slice is used up (0.75ms in effect becomes 1ms); on wakeup try picking right away, and preempt immediately if so</td></tr>
+              <tr><td>What eligibility looks at</td><td>The request's <span class="tex">v_e</span>: eligible throughout the request</td><td>The entity's current vruntime: it can become ineligible while running, and <code>RUN_TO_PARITY</code> lets it finish its slice</td></tr>
+              <tr><td>Lag on rejoining</td><td>Strategy 1 keeps it, strategy 2 resets it to zero; the joiner bears a share itself</td><td><code>PLACE_LAG</code> on is strategy 1, off is strategy 2 (comment in <code>features.h</code>); scaled up and brought back in full</td></tr>
+              <tr><td>Range of lag</td><td>Not truncated; the bounds are proven</td><td>Truncated at <span class="tex">\max(2 \times \text{slice}, \text{TICK})</span></td></tr>
+              <tr><td>Leaving with negative lag</td><td>Strategy 3: first issue a request of length 0 and leave only once the lag is back to 0</td><td>v6.12's <code>DELAY_DEQUEUE</code> has the same idea: stay on the runqueue and leave for real only once the lag is paid off</td></tr>
+            </tbody>
+          </table>
+          <p>The timing of picks differs the most. In scenario 5 none of the three hogs sleeps, so nothing joins or leaves, and this is the only difference. The lag of the nice 5 task relative to GPS lies between <span data-sim="nice eevdf-v6.6 nice5.lagmin">−0.92ms</span> and <span data-sim="nice eevdf-v6.6 nice5.lagmax">0.49ms</span> under kernel v6.6; the lower bound exceeds the 0.75ms slice because the tick stretches the request to 1ms. The paper version stays between <span data-sim="nice eevdf-paper nice5.lagmin">−0.18ms</span> and <span data-sim="nice eevdf-paper nice5.lagmax">0.39ms</span>.</p>
+          <p class="fine">On the Simulate page you can tick "EEVDF paper" under the comparison picker to see it next to the kernel versions. The paper version uses a 0.1ms quantum, floating-point values, and breaks deadline ties the way Figure 1 of the paper does. The code in Appendix A of the paper makes a rejoining request eligible immediately; here we follow the definition in Section 3 of the main text, so a task with negative lag waits for <span class="tex">V</span> to catch up. Source: I. Stoica, H. Abdel-Wahab, TR-95-22, Old Dominion University, 1995, Sections 3 to 6 and Appendix A.</p>
+        </details>
+
+        <h2>What v6.6 still cannot do</h2>
+        <p>In v6.6 every task's slice is fixed at <code>sysctl_sched_base_slice</code> (0.75ms), so deadlines cannot be spread apart, and the CPU scheduler has no way to know who is in more of a hurry. On top of that, lag is brought back as is, so a task that goes to sleep right after running a stretch usually wakes up with negative lag, is not eligible, and has to wait a bit longer. Together these two are the problem v6.12 sets out to solve (<a class="chref" data-ref="slice"></a>).</p>
+        </template>
       </article>
 
-      <article class="card explain chapter" data-ch="preempt" data-title="什麼時候換人：preemption" data-q="醒來的 task 可以插隊嗎？">
+      <article class="card explain chapter" data-ch="preempt" data-title="什麼時候換人：preemption" data-q="醒來的 task 可以插隊嗎？" data-title-en="When to switch: preemption" data-q-en="Can a task that wakes up jump the queue?">
         <p>前面談的都是「挑誰」，另一個同樣重要的問題是「什麼時候挑」。回到<a class="chref" data-ref="problem"></a>的狀態圖，task 離開 CPU 有兩種方式：自己去睡，或是被換下。只在第一種情況才重新挑選的 CPU scheduler 稱為 non-preemptive，一個不睡覺的 CPU-bound task 拿到 CPU 後就不會交出來（Windows 3.x 和 Mac OS 9 以前的 cooperative multitasking 就是這樣，一個程式卡在迴圈裡，整台電腦跟著卡住）。允許把 CPU 從正在執行的 task 手上拿走的，稱為 preemptive。</p>
         <p>Linux 的 CPU scheduler 是 preemptive 的，搶占發生在兩個時機：</p>
         <table class="mini eq-ex">
@@ -1009,9 +1102,53 @@
           <p>A 的 deadline 比 B 早，是因為它帶著正的 lag 醒來，被放在 V 的左邊很遠。slice 一樣長的情況下，這需要 A 睡前被欠了不少，模擬裡的 audio 很少符合這個條件。</p>
         </details>
         <p class="fine">另一個名稱相近的觀念是 kernel preemption（<code>CONFIG_PREEMPT</code>）：task 正在執行 kernel 程式碼（例如 system call）的途中，能不能被換下。本站只模擬 task 之間由 CPU scheduler 決定的搶占，不涉及這一層。</p>
+        <template lang="en">
+        <p>So far the question has been "whom to pick". An equally important question is "when to pick". Going back to the state diagram in <a class="chref" data-ref="problem"></a>, a task leaves the CPU in one of two ways: it goes to sleep by itself, or it is switched out. A CPU scheduler that picks again only in the first case is called non-preemptive: a CPU-bound task that never sleeps, once it has the CPU, never gives it up (this is how the cooperative multitasking of Windows 3.x and Mac OS before version 9 worked; one program stuck in a loop froze the whole computer). One that may take the CPU away from the running task is called preemptive.</p>
+        <p>The Linux CPU scheduler is preemptive, and preemption happens at two moments:</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>Moment</th><th>CFS v2.6.24</th><th>EEVDF v6.6</th></tr></thead>
+          <tbody>
+            <tr><td>Tick: has curr used up its share?</td><td><span class="tex">\delta_{\text{exec}} > \text{sched\_slice}</span></td><td><span class="tex">v_{\text{curr}} \ge d_{\text{curr}}</span></td></tr>
+            <tr><td>Wakeup: may the woken task jump the queue?</td><td><span class="tex">v_{\text{curr}} - v_{\text{wakee}} > \text{gran}</span></td><td><code>pick_eevdf()</code> picks the woken task</td></tr>
+          </tbody>
+        </table>
+        <p><span class="tex">\delta_{\text{exec}}</span> is how long curr has run since it last got the CPU, and <span class="tex">v_{\text{wakee}}</span> is the vruntime of the task that woke up. The tick row guarantees that no task can hold the CPU forever; the wakeup row decides whether the woken task has to wait, and that row is what the two sched_feat switches on the Simulate page control.</p>
+
+        <h2>WAKEUP_PREEMPT in CFS</h2>
+        <p>The condition CFS checks on wakeup (<code>check_preempt_wakeup()</code>) is</p>
+        <div class="tex-block">v_{\text{curr}} - v_{\text{wakee}} > \text{gran}, \qquad \text{gran} = 10\,\text{ms} \times \frac{1024}{w_{\text{curr}}}</div>
+        <p>That is, the woken task's vruntime must be smaller than curr's by more than 10ms (<code>sysctl_sched_wakeup_granularity</code>, scaled by curr's weight) for it to jump the queue. The threshold stops tasks that are "only a little behind" from interrupting curr all the time. The wakeup bonus places the woken task at <code>min_vruntime</code> − 20ms, which is usually past the threshold, so an interactive task usually runs right away after waking.</p>
+        <p><code>WAKEUP_PREEMPT</code> turns off exactly this rule, but that does not make CFS non-preemptive: the tick check is still there, and the woken task just has to wait for curr to use up its <code>sched_slice()</code>. Turning it off in the "latency vs. fairness" scenario on the Simulate page (audio wakes every 5ms, alongside two compile tasks cc1 and cc2) gives, over 2 seconds:</p>
+        <table class="mini eq-ex">
+          <thead><tr><th></th><th>on</th><th>off</th></tr></thead>
+          <tbody>
+            <tr><td>audio's mean wakeup latency</td><td><span data-sim="latency cfs-v2.6.24 audio.lat">10 µs</span></td><td><span data-sim="latency cfs-v2.6.24 -WAKEUP_PREEMPT audio.lat">1.96 ms</span></td></tr>
+            <tr><td>context switches</td><td><span data-sim="latency cfs-v2.6.24 switches">786</span></td><td><span data-sim="latency cfs-v2.6.24 -WAKEUP_PREEMPT switches">568</span></td></tr>
+            <tr><td>audio's CPU share</td><td><span data-sim="latency cfs-v2.6.24 audio.share">6.06%</span></td><td><span data-sim="latency cfs-v2.6.24 -WAKEUP_PREEMPT audio.share">4.37%</span></td></tr>
+          </tbody>
+        </table>
+        <p>audio has to wait for cc to use up its slice every time, and its latency goes from almost 0 to about 2ms. On the other hand cc is interrupted less often, and context switches drop by about 28%. audio's period gets longer, it completes fewer periods per second, and its CPU share drops with it.</p>
+
+        <h2>RUN_TO_PARITY in EEVDF</h2>
+        <p>EEVDF's wakeup preemption has no fixed threshold; it simply asks the picking rule: if we picked again now, would <code>pick_eevdf()</code> choose the woken task? If so, preempt. The rule is consistent, but curr may be switched out after running only a short stretch because a task with an earlier deadline woke up. <code>RUN_TO_PARITY</code> handles this: once curr has been picked, as long as it is still eligible, it is allowed to finish this slice without deadlines being compared again in the meantime.</p>
+        <p>Turning <code>RUN_TO_PARITY</code> off on the Simulate page changes almost nothing (context switches <span data-sim="latency eevdf-v6.6 switches">1881</span> → <span data-sim="latency eevdf-v6.6 -RUN_TO_PARITY switches">1871</span>, and audio's latency is exactly the same). The reason is that in v6.6 every task's slice is 0.75ms. curr was picked while eligible, so its deadline is at most <span class="tex">V + 0.75</span>; a woken task without much lag is placed near V, with its deadline also near <span class="tex">V + 0.75</span>, so even comparing again, curr usually still has the earlier deadline. What this protection really holds back are tasks with a shorter slice than curr's. That is why v6.12, when it let tasks set their own slice, also added <code>PREEMPT_SHORT</code>: a waking task with a shorter slice than curr's can cancel this protection (<a class="chref" data-ref="slice"></a>).</p>
+        <details class="deep">
+          <summary>Deeper: what RUN_TO_PARITY holds back, in numbers</summary>
+          <p>Three nice 0 tasks, units in ms, and suppose <span class="tex">V = 0</span> at this moment. B was picked at <span class="tex">v = -0.3</span> with a 0.75 slice, so its deadline is 0.45. After it has run 0.2ms, A wakes up; it went to sleep with a lag of +0.5, so it is placed at <span class="tex">v = -0.5</span> with a deadline of 0.25.</p>
+          <table class="mini eq-ex">
+            <thead><tr><th></th><th><span class="tex">v_i</span></th><th>eligible</th><th><span class="tex">d_i</span></th><th>RUN_TO_PARITY off</th><th>on</th></tr></thead>
+            <tbody>
+              <tr><td>B (curr)</td><td>−0.1</td><td>yes</td><td>0.45</td><td>switched out</td><td>finishes the remaining 0.55ms</td></tr>
+              <tr><td>A (just woke)</td><td>−0.5</td><td>yes</td><td>0.25</td><td>runs at once</td><td>waits for B to finish</td></tr>
+            </tbody>
+          </table>
+          <p>A's deadline is earlier than B's because it woke up with positive lag and was placed far to the left of V. With equal slices, that requires A to have been owed quite a lot before sleeping, which audio in the simulation rarely is.</p>
+        </details>
+        <p class="fine">A similarly named idea is kernel preemption (<code>CONFIG_PREEMPT</code>): whether a task can be switched out while in the middle of running kernel code (for example a system call). This site simulates only the preemption between tasks decided by the CPU scheduler, not that layer.</p>
+        </template>
       </article>
 
-      <article class="card explain chapter" data-ch="slice" data-title="v6.12：讓 task 說出自己的 slice" data-q="audio 宣告了短 slice，為什麼一開始沒有變快？">
+      <article class="card explain chapter" data-ch="slice" data-title="v6.12：讓 task 說出自己的 slice" data-q="audio 宣告了短 slice，為什麼一開始沒有變快？" data-title-en="v6.12: letting a task state its own slice" data-q-en="audio declared a short slice, so why did it not get faster at first?">
         <p><a class="chref" data-ref="eevdf"></a>的結尾留下兩個問題：v6.6 的 slice 大家都一樣，deadline 拉不開；剛跑完一段就去睡的 task，醒來時帶著負的 lag。v6.12（2024 年 11 月）先解決第一個：task 可以用 <code>sched_setattr()</code> 的 <code>sched_attr.sched_runtime</code> 欄位指定自己的 slice（<code>custom_slice</code>），kernel 把它限制在 0.1ms 到 100ms 之間。deadline 的公式不變，只是 <span class="tex">\text{slice}_i</span> 每個 task 可以不同：</p>
         <div class="tex-block">d_i = v_i + \text{slice}_i \times \frac{1024}{w_i}</div>
         <p>拿模擬頁「延遲和公平」的情境來看：audio 每 5ms 醒來，跑 0.31ms 就去睡，要求 0.3ms 的 slice；cc1、cc2 是一直有事做的編譯 task，用預設的 0.75ms。三個都是 nice 0。audio 和 cc 同樣站在 <span class="tex">V</span> 上時，audio 的 deadline 是 <span class="tex">V + 0.3</span>，cc 是 <span class="tex">V + 0.75</span>，照<a class="chref" data-ref="eevdf"></a>的挑選規則，audio 應該先跑。</p>
@@ -1056,6 +1193,52 @@
           <p><code>sched_delayed</code> 的 task 仍然在樹上，它的權重也還算在 <span class="tex">W</span> 和 <span class="tex">V</span> 的加權平均裡。audio 延後離開的那 0.62ms，<span class="tex">V</span> 以 <span class="tex">1024 / 3072</span> 的速度前進，而不是只剩兩個 cc 時的 <span class="tex">1024 / 2048</span>，這正是 audio 的 lag 能以 1/3 的速度爬回 0 的原因。換句話說，它「還債」的速度，是照它仍在競爭時算的。</p>
           <p>v6.12 還修正了 fork 的放置：v6.6 的 <code>PLACE_DEADLINE_INITIAL</code> 想讓新 task 從半個 slice 開始，卻被之後的 <code>activate_task()</code> 再放一次而蓋掉；v6.12 讓 fork 的那次放置帶上 <code>ENQUEUE_INITIAL</code>，半個 slice 才真的生效。</p>
         </details>
+        <template lang="en">
+        <p><a class="chref" data-ref="eevdf"></a> ended with two problems: in v6.6 every task has the same slice, so deadlines cannot be spread apart; and a task that goes to sleep right after running a stretch wakes up with negative lag. v6.12 (November 2024) tackles the first one: a task can set its own slice through the <code>sched_attr.sched_runtime</code> field of <code>sched_setattr()</code> (<code>custom_slice</code>), which the kernel clamps to between 0.1ms and 100ms. The deadline formula is unchanged, except that <span class="tex">\text{slice}_i</span> can now differ from task to task:</p>
+        <div class="tex-block">d_i = v_i + \text{slice}_i \times \frac{1024}{w_i}</div>
+        <p>Take the "latency vs. fairness" scenario on the Simulate page: audio wakes every 5ms, runs 0.31ms, goes back to sleep, and asks for a 0.3ms slice; cc1 and cc2 are compile tasks that always have work to do and use the default 0.75ms. All three are nice 0. When audio and a cc both stand at <span class="tex">V</span>, audio's deadline is <span class="tex">V + 0.3</span> and cc's is <span class="tex">V + 0.75</span>, so by the picking rule of <a class="chref" data-ref="eevdf"></a>, audio should run first.</p>
+        <p>Yet in the simulator, adding custom slices alone leaves audio's latency completely unchanged. The two other things v6.12 added at the same time are both indispensable:</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>Scenario 4, 2 s</th><th>audio's mean wakeup latency</th><th>p99</th><th>audio's CPU share (fair share <span data-sim="latency gps audio.share">5.49%</span>)</th></tr></thead>
+          <tbody>
+            <tr><td>v6.6</td><td><span data-sim="latency eevdf-v6.6 audio.lat">623 µs</span></td><td><span data-sim="latency eevdf-v6.6 audio.p99">960 µs</span></td><td><span data-sim="latency eevdf-v6.6 audio.share">5.49%</span></td></tr>
+            <tr><td>v6.12, audio asks for no slice</td><td><span data-sim="latency eevdf-v6.12-slice -custom_slice audio.lat">620 µs</span></td><td><span data-sim="latency eevdf-v6.12-slice -custom_slice audio.p99">960 µs</span></td><td><span data-sim="latency eevdf-v6.12-slice -custom_slice audio.share">5.49%</span></td></tr>
+            <tr><td>v6.12, 0.3ms slice, <code>PREEMPT_SHORT</code> off</td><td><span data-sim="latency eevdf-v6.12-slice -PREEMPT_SHORT audio.lat">620 µs</span></td><td><span data-sim="latency eevdf-v6.12-slice -PREEMPT_SHORT audio.p99">960 µs</span></td><td><span data-sim="latency eevdf-v6.12-slice -PREEMPT_SHORT audio.share">5.49%</span></td></tr>
+            <tr><td>v6.12, 0.3ms slice, <code>DELAY_DEQUEUE</code> off</td><td><span data-sim="latency eevdf-v6.12-slice -DELAY_DEQUEUE audio.lat">620 µs</span></td><td><span data-sim="latency eevdf-v6.12-slice -DELAY_DEQUEUE audio.p99">960 µs</span></td><td><span data-sim="latency eevdf-v6.12-slice -DELAY_DEQUEUE audio.share">5.49%</span></td></tr>
+            <tr class="picked"><td>v6.12, all three</td><td><span data-sim="latency eevdf-v6.12-slice audio.lat">3 µs</span></td><td><span data-sim="latency eevdf-v6.12-slice audio.p99">0</span></td><td><span data-sim="latency eevdf-v6.12-slice audio.share">6.15%</span></td></tr>
+          </tbody>
+        </table>
+        <p>For audio to get onto the CPU right after waking, it has to clear two hurdles.</p>
+
+        <h2>Hurdle one: curr's protection and PREEMPT_SHORT</h2>
+        <p>When audio wakes up, the CPU is usually running one of the cc tasks. As <a class="chref" data-ref="preempt"></a> explained, <code>RUN_TO_PARITY</code> lets curr finish its current slice without comparing deadlines again when someone wakes up. However early audio's deadline is, it has to wait for cc to finish.</p>
+        <p><code>PREEMPT_SHORT</code> lets a task with a shorter slice cancel this protection. The condition <code>do_preempt_short()</code> checks is (<span class="tex">p</span> is the woken task, <span class="tex">c</span> is curr):</p>
+        <div class="tex-block">\text{slice}_p < \text{slice}_c \;\;\wedge\;\; p \text{ eligible} \;\;\wedge\;\; \bigl(d_p < d_c \;\vee\; c \text{ not eligible}\bigr)</div>
+        <p>When it holds, the kernel takes curr out from under the <code>RUN_TO_PARITY</code> protection and picks again immediately. The first condition shows why audio must declare a slice: with the same 0.75ms slice as cc, this rule never kicks in at all.</p>
+
+        <h2>Hurdle two: waking up with negative lag</h2>
+        <p>The second condition, "<span class="tex">p</span> eligible", is where it really gets stuck. Each time audio runs 0.31ms, during which GPS would give each of the three nice 0 tasks a third, so audio's lag drops by</p>
+        <div class="tex-block">\Delta\text{lag} = -\,0.31 \times \Bigl(1 - \frac{1}{3}\Bigr) \approx -0.21\ \text{ms}</div>
+        <p>It goes to sleep at −0.21ms. v6.6's <code>PLACE_LAG</code> (<a class="chref" data-ref="eevdf"></a>) saves that debt and puts it back unchanged on waking, to the right of <span class="tex">V</span>. audio is not eligible, so however short its slice, it cannot be picked. All it can do is queue and watch the others run while its lag climbs back to 0 at rate <span class="tex">w_i / W = 1/3</span>:</p>
+        <div class="tex-block">t_{\text{wait}} = \frac{|\text{lag}|}{w_i / W} = \frac{0.21}{1/3} \approx 0.62\ \text{ms}</div>
+        <p>That is exactly the <span data-sim="latency eevdf-v6.12-slice -DELAY_DEQUEUE audio.lat">620µs</span> in the table. By the books this is not wrong: audio did just take more than its share, and it ought to wait for the others to catch up. The problem is the timing. audio sleeps for 4.73ms each time, and the others caught up long ago, but the books are frozen while it sleeps, so that time is not counted.</p>
+        <p><code>DELAY_DEQUEUE</code> keeps the books running while the task sleeps. If a task is not eligible when it goes to sleep, <code>dequeue_entity()</code> does not take it off the runqueue yet; it only marks it <code>sched_delayed</code> and leaves it in the tree to keep competing. It never actually runs, but <span class="tex">V</span> keeps moving forward and its lag climbs with it. When <code>pick_eevdf()</code> eventually picks it, its lag must already be ≥ 0, and only then does the kernel really remove it, with <code>DELAY_ZERO</code> cutting any positive lag to 0. The description in <code>kernel/sched/features.h</code> is:</p>
+        <blockquote>By delaying the dequeue for non-eligible tasks, they remain in the competition and can burn off their negative lag. When they get selected they'll have positive lag by definition.</blockquote>
+        <p>audio's 0.62ms debt is paid off right at the start of its 4.73ms sleep; it wakes up with lag 0, eligible, and clears both hurdles. Tick the switches below to see how audio's lag moves over one period, and which condition it gets stuck on when it wakes:</p>
+        <div class="widget" id="w-v612"></div>
+        <p class="try">Start with only custom slice and <code>PREEMPT_SHORT</code> on (the default): audio wakes outside the eligible zone and waits <span data-sim="latency eevdf-v6.12-slice -DELAY_DEQUEUE audio.lat">620µs</span>. Turn on <code>DELAY_DEQUEUE</code>, and the short stretch of line after it falls asleep climbs back to 0, so it can run as soon as it wakes. Then turn off custom slice: the lag is still 0, but since its slice is no shorter than cc's, it has to wait anyway.</p>
+        <p class="fine">Simplifications: the lag curve is a toy model of three nice 0 tasks in steady state, and the queueing time in the "eligible but cannot jump the queue" case is taken from the average in the simulation below. The latency and CPU share below come from running scenario 4 for two seconds in the simulator.</p>
+
+        <h2>The price: who pays the debt paid off while asleep</h2>
+        <p>With all three, audio gets <span data-sim="latency eevdf-v6.12-slice audio.share">6.15%</span> of the CPU, exactly its full demand per period <span class="tex">0.31 / (0.31 + 4.73)</span>, and more than its fair share of <span data-sim="latency gps audio.share">5.49%</span>; the extra comes from cc1 and cc2, about 0.3 percentage points less each.</p>
+        <p>The reason is that "paying off the debt while asleep" happens only on paper. While audio stays on the runqueue, the CPU still goes entirely to cc1 and cc2; they gain nothing from it, audio's books are just set to 0. Measured against the GPS of <a class="chref" data-ref="lag"></a> (lag frozen during sleep), audio is let off about 0.21ms of debt every period, and on the Simulate page its lag line keeps going down.</p>
+        <p>The result is close to that of the CFS wakeup bonus (<a class="chref" data-ref="cfs"></a>), under which audio also gets <span data-sim="latency cfs-v2.6.24 audio.share">6.06%</span>; the difference is in the rule. CFS ignores the books from before the sleep and always places a waking task some way to the left; v6.12 forgives only negative lag, and only while the task is really asleep and the others can use the CPU. Latency is bought with the slice the task declares itself, not with the CPU scheduler's guesses. <a class="chref" data-ref="tradeoff"></a> puts these approaches side by side to look at the trade-off between latency, fairness and the number of switches. <a href="#/sim/latency">See scenario 4 on the Simulate page →</a></p>
+        <details class="deep">
+          <summary>Deeper: a delayed task still pulls on V</summary>
+          <p>A <code>sched_delayed</code> task is still in the tree, and its weight still counts in <span class="tex">W</span> and in the weighted average <span class="tex">V</span>. During the 0.62ms audio's departure is delayed, <span class="tex">V</span> advances at <span class="tex">1024 / 3072</span> rather than the <span class="tex">1024 / 2048</span> it would with only the two cc tasks, and that is exactly why audio's lag can climb back to 0 at rate 1/3. In other words, the rate at which it "pays off its debt" is the one it would have if it were still competing.</p>
+          <p>v6.12 also fixed the placement at fork: v6.6's <code>PLACE_DEADLINE_INITIAL</code> meant to start a new task at half a slice, but was overwritten when the later <code>activate_task()</code> placed it again. v6.12 passes <code>ENQUEUE_INITIAL</code> with the placement at fork, so the half slice actually takes effect.</p>
+        </details>
+        </template>
       </article>
 
       <article class="card explain chapter" data-ch="tradeoff" data-title="延遲與吞吐量的取捨" data-q="切換得越勤，就越好嗎？">
