@@ -1,5 +1,6 @@
 // 學習路線（#/learn/<章>）：一次只顯示一章，左邊章節目錄，底下上一章／下一章。
-// 章節的標題與問題寫在 index.html 每個 <article class="chapter"> 的 data-title / data-q。
+// 章節的標題與問題寫在 index.html 每個 <article class="chapter"> 的 data-title / data-q（英文是 data-title-en / data-q-en）。
+import { isEn, tr } from '../i18n.ts';
 
 interface Chapter {
   id: string;
@@ -19,8 +20,8 @@ export function mountLearn(): void {
   chapters = [...document.querySelectorAll<HTMLElement>('#page-learn article.chapter')].map((el) => ({
     id: el.dataset.ch!,
     appendix: el.classList.contains('appendix'),
-    title: el.dataset.title!,
-    q: el.dataset.q!,
+    title: (isEn && el.dataset.titleEn) || el.dataset.title!,
+    q: (isEn && el.dataset.qEn) || el.dataset.q!,
     el,
   }));
   const main = chapters.filter((c) => !c.appendix);
@@ -31,7 +32,7 @@ export function mountLearn(): void {
     const i = main.findIndex((c) => c.id === a.dataset.ref);
     if (i < 0) throw new Error(`chref 指到不存在的章節：${a.dataset.ref}`);
     a.href = href(a.dataset.ref!);
-    a.textContent = `第 ${i + 1} 章`;
+    a.textContent = tr(`第 ${i + 1} 章`, `chapter ${i + 1}`);
   }
 
   const toc = document.getElementById('learnToc')!;
@@ -40,7 +41,7 @@ export function mountLearn(): void {
     if (c.appendix) li.className = 'toc-appendix';
     const a = document.createElement('a');
     a.href = href(c.id);
-    a.innerHTML = `<span class="toc-n">${c.appendix ? '附' : main.indexOf(c) + 1}</span><span class="toc-t"><b>${c.title}</b><span>${c.q}</span></span>`;
+    a.innerHTML = `<span class="toc-n">${c.appendix ? tr('附', 'A') : main.indexOf(c) + 1}</span><span class="toc-t"><b>${c.title}</b><span>${c.q}</span></span>`;
     li.append(a);
     toc.append(li);
     return a;
@@ -50,7 +51,7 @@ export function mountLearn(): void {
     const i = main.indexOf(c);
     const head = document.createElement('header');
     head.className = 'ch-head';
-    const no = c.appendix ? '附錄' : `第 ${i + 1} 章 <span>/ ${n}</span>`;
+    const no = c.appendix ? tr('附錄', 'Appendix') : tr(`第 ${i + 1} 章 <span>/ ${n}</span>`, `Chapter ${i + 1} <span>/ ${n}</span>`);
     head.innerHTML = `<div class="ch-no">${no}</div><h1>${c.title}</h1><p class="ch-q">${c.q}</p>`;
     c.el.prepend(head);
     if (c.appendix) return;
@@ -60,10 +61,10 @@ export function mountLearn(): void {
     const foot = document.createElement('div');
     foot.className = 'ch-nav';
     foot.innerHTML =
-      (prev ? `<a class="ch-prev" href="${href(prev.id)}"><span>← 上一章</span><b>${prev.title}</b></a>` : '<span></span>') +
+      (prev ? `<a class="ch-prev" href="${href(prev.id)}"><span>${tr('← 上一章', '← Previous')}</span><b>${prev.title}</b></a>` : '<span></span>') +
       (next
-        ? `<a class="ch-next" href="${href(next.id)}"><span>下一章 →</span><b>${next.title}</b></a>`
-        : `<a class="ch-next" href="#/sim"><span>讀完了 →</span><b>到模擬頁把各代 CPU scheduler 並排比較</b></a>`);
+        ? `<a class="ch-next" href="${href(next.id)}"><span>${tr('下一章 →', 'Next →')}</span><b>${next.title}</b></a>`
+        : `<a class="ch-next" href="#/sim"><span>${tr('讀完了 →', 'Done →')}</span><b>${tr('到模擬頁把各代 CPU scheduler 並排比較', 'Compare the CPU schedulers side by side on the Simulate page')}</b></a>`);
     c.el.append(foot);
   });
 
@@ -79,7 +80,7 @@ export function showChapter(id: string | undefined): string {
   const active = tocLinks[chapters.indexOf(cur)]!;
   const ol = active.closest('ol')!;
   if (ol.scrollWidth > ol.clientWidth) ol.scrollLeft = active.offsetLeft - ol.clientWidth / 2 + active.offsetWidth / 2;
-  document.title = `${cur.title}｜排程器演進模擬`;
+  document.title = `${cur.title}${tr('｜排程器演進模擬', ' · CPU scheduler evolution')}`;
   return cur.id;
 }
 

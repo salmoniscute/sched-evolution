@@ -47,7 +47,7 @@
       </div>
     </header>
 
-    <p class="untranslated" id="untranslated" hidden>This page has not been translated into English yet and is shown in Chinese. The <a href="#/sim">Simulate</a> page is available in English. <button type="button" class="link" data-lang="zh">切換成中文</button></p>
+    <p class="untranslated" id="untranslated" hidden>This part has not been translated into English yet and is shown in Chinese. <button type="button" class="link" data-lang="zh">切換成中文</button></p>
 
     <section class="page" id="page-intro" hidden>
       <article class="card explain intro">
@@ -77,7 +77,7 @@
 
         <h2>怎麼使用這個網站</h2>
         <div class="tour-cards three">
-          <a class="tcard" href="#/learn/problem"><span class="tnum">1</span><b>學習路線</b><span>十個短章，每章一個問題、一條公式、一張可以操作的小圖。從權重、O(1) 一路走到 EEVDF 與延遲的取捨。</span></a>
+          <a class="tcard" href="#/learn/problem"><span class="tnum">1</span><b>學習路線</b><span>十二個短章，每章一個問題、一條公式、一張可以操作的小圖。從權重、O(1) 一路走到 EEVDF 與延遲的取捨。</span></a>
           <a class="tcard" href="#/sim"><span class="tnum">2</span><b>模擬</b><span>從 2.4 的 O(n) 到 6.12 的 EEVDF，挑幾個 CPU scheduler 並排執行同一組工作負載。點時間軸看每個決策的理由，關掉開關看差在哪裡。</span></a>
           <a class="tcard" href="#/source"><span class="tnum">3</span><b>原始碼</b><span>task 被喚醒時放在哪裡，逐步對照 CFS 與 EEVDF 當年的 kernel 程式碼。</span></a>
         </div>
@@ -91,12 +91,54 @@
             <li><a href="https://lwn.net/Articles/925371/" target="_blank" rel="noopener">LWN: An EEVDF CPU scheduler for Linux</a>（2023）：EEVDF 合併前的背景與動機。</li>
           </ul>
         </details>
+        <template lang="en">
+        <h1>The evolution of the Linux CPU scheduler</h1>
+        <p class="lead">From 2.4 to 6.12, how did each generation of the Linux CPU scheduler decide which task runs next, and why did it keep getting rewritten? This site runs the same workload through CPU schedulers from different eras and shows their behaviour side by side. Every scheduling decision can be opened to see the reason behind it, next to the kernel source of the time.</p>
+        <p>Picture this: you are building the kernel with <code>make -j</code> while listening to music and typing in an editor. The build will eat every bit of CPU it can get, yet the music should not stutter, and a key press should show up on screen right away. Whether that works comes down to how the CPU scheduler trades these tasks off against each other.</p>
+
+        <h2>Why learn about the CPU scheduler</h2>
+        <div class="reasons" id="w-reasons">
+          <button type="button" class="reason" data-r="0"><b>Operating systems in one place</b><span>task states, timer interrupts, preemption, locks and red-black trees all meet in the same code</span></button>
+          <button type="button" class="reason" data-r="1"><b>Performance analysis</b><span>a slow program may simply be waiting on the runqueue; p99 latency often comes from here</span></button>
+          <button type="button" class="reason" data-r="2"><b>Theory vs. engineering</b><span>proportional share comes with proofs, but the kernel has to live with integers, ticks and compatibility</span></button>
+        </div>
+        <div class="reason-body">
+          <p data-r="0">Working out how a CPU scheduler operates touches nearly every chapter of an operating systems textbook: process states and <code>task_struct</code>, the timer interrupt that drives the tick, context switches and preemption (and the sections that must not be preempted), the lock protecting the runqueue, data structures built for constant-time picking (the O(1) bitmap, the CFS red-black tree, the augmented red-black tree of EEVDF), and further out, load balancing across cores, cache and NUMA locality, and power saving. Understanding the CPU scheduler means tying all of these together again inside one real system.</p>
+          <p data-r="1" hidden>The elapsed time of a task splits into time actually running on a CPU and time spent wanting to run but waiting on the runqueue, and the latter is decided entirely by the CPU scheduler. Linux records both in <code>/proc/&lt;pid&gt;/schedstat</code>, and <code>perf sched latency</code> lists how long each task waited after being woken. On a server, what users feel as lag is usually tail latency such as p99, and how long a request-handling thread waits after waking is exactly the CPU scheduler's job. The other way round, switching tasks often lowers latency but adds context-switch cost and destroys cache locality, so throughput drops. Without knowing how the CPU scheduler balances these two ends, it is hard to tell from such numbers where a problem lies.</p>
+          <p data-r="2" hidden>The CPU scheduler is one of the places in an operating system where theory and engineering meet most visibly. Proportional share has a clean mathematical model, and EEVDF even comes from a 1995 paper by Stoica and Abdel-Wahab that includes proofs. The kernel implementation, though, has to deal with integer arithmetic, tick granularity, every kind of workload, and the pressure of "never make existing users slower". Comparing the theoretical model with the kernel implementation, one gap at a time, is the most direct way to understand these engineering trade-offs.</p>
+        </div>
+
+        <h2>Why Linux keeps rewriting its CPU scheduler</h2>
+        <p>Each major rewrite fixed a problem the previous generation had exposed: with many tasks, the cost of picking got out of hand; heuristics that guessed which tasks were interactive were easily fooled; and pure fairness could not express latency needs. Click an era on the timeline to see what its design focused on.</p>
+        <div class="widget" id="w-history"></div>
+        <details class="deep">
+          <summary>Looking back along this path</summary>
+          <p>Up to O(1), the CPU scheduler used heuristics to guess which tasks were interactive. CFS gave up guessing and aimed only for fairness, looking after interactive tasks with a rough wakeup bonus. EEVDF separated fairness from latency, and in v6.12 let tasks state their needs themselves. The quantity called lag has an interesting history too: <code>wait_runtime</code> in v2.6.23 recorded lag directly, it stopped existing explicitly once v2.6.24 switched to vruntime, and in v6.6 it came back as <code>vlag</code>.</p>
+        </details>
+
+        <h2>How to use this site</h2>
+        <div class="tour-cards three">
+          <a class="tcard" href="#/learn/problem"><span class="tnum">1</span><b>Learn</b><span>Twelve short chapters, each with one question, one formula and one small chart you can play with. From weights and O(1) all the way to EEVDF and the latency trade-off.</span></a>
+          <a class="tcard" href="#/sim"><span class="tnum">2</span><b>Simulate</b><span>From the O(n) scheduler of 2.4 to EEVDF in 6.12, pick a few CPU schedulers and run the same workload on them side by side. Click the timeline to see the reason for each decision, and turn switches off to see what changes.</span></a>
+          <a class="tcard" href="#/source"><span class="tnum">3</span><b>Source</b><span>Where a task is placed when it wakes up, stepping through the kernel code of CFS and EEVDF side by side.</span></a>
+        </div>
+        <p class="next"><a href="#/learn/problem">Start with chapter 1<span class="arrow" aria-hidden="true">→</span></a></p>
+
+        <details class="deep refs-box">
+          <summary>Further reading</summary>
+          <ul class="refs">
+            <li><a href="https://hackmd.io/@sysprog/linux-scheduler-0" target="_blank" rel="noopener">Linux Kernel Design: CPU Scheduler</a> (sysprog lecture notes, in Chinese): from an overview through O(1), CFS and EEVDF to sched_ext, SCHED_DEADLINE and PREEMPT_RT, covering far more than this site.</li>
+            <li>I. Stoica, H. Abdel-Wahab, “Earliest Eligible Virtual Deadline First: A Flexible and Accurate Mechanism for Proportional Share Resource Allocation,” 1995: the original EEVDF paper.</li>
+            <li><a href="https://lwn.net/Articles/925371/" target="_blank" rel="noopener">LWN: An EEVDF CPU scheduler for Linux</a> (2023): background and motivation before EEVDF was merged.</li>
+          </ul>
+        </details>
+        </template>
       </article>
     </section>
 
     <section class="page" id="page-learn" hidden>
       <div class="learn">
-        <aside class="toc" aria-label="章節"><ol id="learnToc"></ol></aside>
+        <aside class="toc" aria-label="章節" data-en-aria="Chapters"><ol id="learnToc"></ol></aside>
         <div class="chapters">
 
       <article class="card explain chapter" data-ch="problem" data-title="CPU scheduler 要解決什麼問題" data-q="只有一顆 CPU，該讓誰先執行？">
