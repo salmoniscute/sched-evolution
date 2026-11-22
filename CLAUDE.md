@@ -36,13 +36,15 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
 - 參數和公式對照當年的原始碼（例如 nice 0 權重 1024、每差一級約 1.25 倍）。
 - 畫面分兩邊：左邊是可逐步執行的模擬時間軸，右邊是當年原始碼，高亮目前執行的函式。
 
-## 介面語言（中文為主，英文分階段）
+## 介面語言（中英並列）
 
 - 網頁有中英兩種語言，右上角切換（網址 `?lang=en`，記在 localStorage）。切換時重新載入，模組在載入時決定語言。
 - **改任何讀者看得到的文字時，中英文一起改。** 程式裡用 `tr('中文', 'English')`（`src/i18n.ts`），兩種寫在同一處；`index.html` 的固定文字把英文寫在 `data-en`、`data-en-title`、`data-en-aria`。名詞表每個條目有 `zh` / `en` 兩份。
+- 大段內文（介紹頁、學習路線每一章）：每個 `<article>` 的最後一個子元素是 `<template lang="en">`，放整篇的英文版，英文模式載入時在小圖掛上去之前整篇換掉。章名與引導問題的英文寫在 `data-title-en` / `data-q-en`。改中文段落時，同一個 article 結尾的英文對應段落也要改。
+- `test/i18n-html.test.ts`：每個 article 都要有英文版且沒有中文；中英兩版的 id、`data-sim` 標記、章節引用、外部連結、公式與 details／figure／table 的數量要一致；`index.html` 其他固定文字要有 `data-en`；小圖與原始碼頁（`src/ui/` 的 `start.ts`、`o1-widgets.ts` 等）的中文字串都要在 `tr()` 的第一個參數裡。英文裡的章節引用顯示為 “Chapter N”。
 - 列舉用 `joinList()`（中文頓號、英文逗號），欄位間隔用 `gap`（中文全形空白、英文 ·），不要在字串裡直接寫全形標點。
 - `test/i18n.test.ts` 用英文模式載入情境、開關、名詞表，並把每個情境 × 排程器 × 開關的每一個決策說明都產生一次，不能有中文，漏翻會在這裡失敗。
-- 目前已翻：導覽列、模擬頁（情境、開關、決策說明、表格、結果圖、導覽）、名詞表。還沒翻：介紹頁、學習路線、原始碼頁（英文模式下頁首顯示提示）。
+- 全部頁面都已翻成英文（2026-11-21）。
 
 ## 原始碼對照
 
@@ -213,3 +215,6 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - sched_ext 的內容對照 `kernel-src/v6.12/Documentation/scheduler/sched-ext.rst` 與 `kernel/sched/ext.c`（新加進 `fetch-kernel-src.sh`）：`struct sched_ext_ops` 只有 `ops.name` 必填、DSQ（local / global，`scx_bpf_dispatch_vtime()` 是優先佇列）、出錯／task 卡住／SysRq-S 退回 fair class、watchdog 預設 `SCX_WATCHDOG_MAX_TIMEOUT` = 30 × HZ、ABI 不穩定。
   - 長文字的表格用 `table.mini.eq-ex.wrap`（`eq-ex` 單獨用會靠右、不換行，會撐破卡片）。
   - zsh 的 `path` 變數綁定 `PATH`，迴圈變數不要取名 `path`。
+
+- 2026-11-21：英文介面補完：介紹頁、學習路線 12 章與附錄、原始碼頁，以及小圖（`start.ts`、`o1-widgets.ts`、`cost-widget.ts`、`eevdf-widgets.ts`）。做法與測試見「介面語言」。「還沒翻譯」的提示已拿掉。
+  - 順手修正：刪掉舊概念頁的殘留 HTML（`#page-concepts`）；介紹頁「十個短章」改成十二；第 7 章與原始碼頁不再提 `kernel-src/` 與抽取腳本；第 11 章「論文……之後會再對照原文」改成指向第 8 章的論文對照。
