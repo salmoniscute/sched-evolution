@@ -116,7 +116,7 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 修正：`schedule()` 改成在 `pick_next_task()` 之後才清 `need_resched`（和 v6.6 `__schedule()` 一致）。原本先清，EEVDF 在 dequeue 途中 `update_deadline()` 再設一次，會在同一時刻多跑一次 `schedule()`。影響：v6.12 情境 4 的 context switch 2134 → 2133。
   - 發現：情境 4 裡 `RUN_TO_PARITY` 關掉幾乎沒差（2026-11-17 更正：原因不只是負 lag。關掉後 audio 搶不到的理由大多變成「cc 的 deadline 比較早」，v6.6 的 slice 一樣長，audio 的 deadline 很少比較早）；CFS 關掉 `NEW_FAIR_SLEEPERS` 後 audio 平均等 8.3ms、只拿到 2.29%。
   - 測試 `test/events.test.ts`：事件和時間軸一致、挑選符合快照（CFS 最左邊；EEVDF eligible 中 deadline 最早）、說明不退回中性敘述。
-  - 待辦：情境 2（editor）的週期剛好 10ms，喚醒會對齊 tick，違反「不對齊 tick」的原則。
+  - 待辦：情境 2（editor）的週期剛好 10ms，喚醒會對齊 tick，違反「不對齊 tick」的原則。（2026-11-21 已改）
 
 - 2026-11-17：讓網頁更適合學習。
   - 新增「從這裡開始」頁（`#/start`，預設首頁）：程式的三種狀態與排程的三種時機（附圖）、延遲 vs. 公平、nice 與權重、CFS 的 vruntime 與喚醒補償、EEVDF 的 eligible / deadline（附數線例子）、演進主線、建議閱讀順序、名詞速查。
@@ -218,3 +218,9 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
 
 - 2026-11-21：英文介面補完：介紹頁、學習路線 12 章與附錄、原始碼頁，以及小圖（`start.ts`、`o1-widgets.ts`、`cost-widget.ts`、`eevdf-widgets.ts`）。做法與測試見「介面語言」。「還沒翻譯」的提示已拿掉。
   - 順手修正：刪掉舊概念頁的殘留 HTML（`#page-concepts`）；介紹頁「十個短章」改成十二；第 7 章與原始碼頁不再提 `kernel-src/` 與抽取腳本；第 11 章「論文……之後會再對照原文」改成指向第 8 章的論文對照。
+
+- 2026-11-21：情境 2 的 editor 改成跑 1.3ms、睡 8.73ms（週期 10.03ms，醒來的時間點相對 tick 每週期移 30µs）。
+  - 發現：原本 8.7ms 時 EEVDF 的 editor 每次醒來都碰上 tick，`need_resched` 已設好，一次都沒進到 `check_preempt_wakeup`。
+  - 數字更新：CFS editor 12.8%、1 秒 lag −74.4ms；EEVDF v6.6 平均等 660µs、v6.12 719µs；O(1) 最久的兩次是頭兩次喚醒（29ms、11ms）。
+  - 發現：v6.12 的 `DELAY_DEQUEUE` 讓 editor 醒來都 eligible（v6.6 有 60/158 次不 eligible），但立刻搶到的次數反而少（40 vs 49），平均等待隨相位擺動（睡 8.7–8.9ms 之間，v6.12 − v6.6 從 −517µs 到 +59µs），不是固定變短。開關說明已改寫。
+  - 待辦：O(1) 關掉 `sleep_avg` 的說明寫「等一整個時間片（約 100ms）」，實測平均 185ms、最久 195ms（改之前就是這樣）。

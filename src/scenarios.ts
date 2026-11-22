@@ -144,7 +144,7 @@ export const scenarios: Scenario[] = [
       tr('和情境 4 類似：一個要反應快的程式，加上兩個要吞吐量的程式。不同的是 editor 沒有告訴排程器自己需要什麼，排程器只能從它的行為去判斷。', 'Similar to the latency scenario: one task that must respond quickly plus two tasks that want throughput. The difference is that the editor does not tell the scheduler what it needs, so the scheduler can only judge from its behaviour.'),
     roles: [
       {
-        what: tr('文字編輯器。每 10ms 醒來處理一次按鍵，花 1.3ms 就去睡。', 'A text editor. Wakes every 10ms to handle a keystroke and goes back to sleep after 1.3ms.'),
+        what: tr('文字編輯器。大約每 10ms 醒來處理一次按鍵，花 1.3ms 就去睡。週期刻意不對齊 1ms 的 tick。', 'A text editor. Wakes about every 10ms to handle a keystroke and goes back to sleep after 1.3ms. The period is deliberately not aligned to the 1ms tick.'),
         needs: tr('延遲。按鍵後畫面晚出來，使用者就會覺得卡。它沒有設定任何 slice。', 'Latency. If the screen updates late after a keystroke, the user feels lag. It does not set any slice.'),
       },
       COMPILE,
@@ -152,12 +152,12 @@ export const scenarios: Scenario[] = [
     ],
     lookFor: [tr('時間軸上 editor（藍色）醒來後排隊（淺色）多久。', 'How long the editor (blue) queues (light) after waking, in the timeline.'), tr('lag 圖的藍線開到 2 秒看長期走向。', 'The blue line of the lag chart over 2 seconds, to see the long-term trend.')],
     takeaway: [
-      tr(`CFS 讓 editor 醒來馬上跑，但它拿了 ${nInt('cfs-v2.6.24 editor.share', '12.9%')} 的 CPU，公平的份是 ${nInt('gps editor.share', '10.3%')}。CFS 對每個剛醒的程式都固定補償，不管它是不是真的需要。`, `CFS lets the editor run as soon as it wakes, but it takes ${nInt('cfs-v2.6.24 editor.share', '12.9%')} of the CPU against a fair share of ${nInt('gps editor.share', '10.3%')}. CFS gives every waking task the same fixed credit, whether it really needs it or not.`),
-      tr(`EEVDF v6.6 剛好給 ${nInt('eevdf-v6.6 editor.share', '10.3%')}，editor 平均要等 ${nInt('eevdf-v6.6 editor.lat', '608µs')}。`, `EEVDF v6.6 gives exactly ${nInt('eevdf-v6.6 editor.share', '10.3%')}; the editor waits ${nInt('eevdf-v6.6 editor.lat', '608µs')} on average.`),
-      tr(`EEVDF v6.12 的結果和 v6.6 差不多（平均等 ${nInt('eevdf-v6.12-slice editor.lat', '503µs')}），因為 editor 沒有要求短 slice。v6.12 不會自己去猜誰是互動型程式，要程式自己講。`, `EEVDF v6.12 gives about the same result as v6.6 (${nInt('eevdf-v6.12-slice editor.lat', '503µs')} on average) because the editor does not ask for a short slice. v6.12 does not guess which tasks are interactive; the task has to say so.`),
+      tr(`CFS 讓 editor 醒來馬上跑，但它拿了 ${nInt('cfs-v2.6.24 editor.share', '12.8%')} 的 CPU，公平的份是 ${nInt('gps editor.share', '10.3%')}。CFS 對每個剛醒的程式都固定補償，不管它是不是真的需要。`, `CFS lets the editor run as soon as it wakes, but it takes ${nInt('cfs-v2.6.24 editor.share', '12.8%')} of the CPU against a fair share of ${nInt('gps editor.share', '10.3%')}. CFS gives every waking task the same fixed credit, whether it really needs it or not.`),
+      tr(`EEVDF v6.6 剛好給 ${nInt('eevdf-v6.6 editor.share', '10.3%')}，editor 平均要等 ${nInt('eevdf-v6.6 editor.lat', '660µs')}。`, `EEVDF v6.6 gives exactly ${nInt('eevdf-v6.6 editor.share', '10.3%')}; the editor waits ${nInt('eevdf-v6.6 editor.lat', '660µs')} on average.`),
+      tr(`EEVDF v6.12 的結果和 v6.6 差不多（平均等 ${nInt('eevdf-v6.12-slice editor.lat', '719µs')}），因為 editor 沒有要求短 slice。v6.12 不會自己去猜誰是互動型程式，要程式自己講。`, `EEVDF v6.12 gives about the same result as v6.6 (${nInt('eevdf-v6.12-slice editor.lat', '719µs')} on average) because the editor does not ask for a short slice. v6.12 does not guess which tasks are interactive; the task has to say so.`),
       {
         variant: 'o1-v2.6.0',
-        text: tr(`O(1) 2.6.0 從 sleep_avg 猜出 editor 是互動型（bonus +5，prio 115），醒來大多立刻打斷 cc，平均只等 ${nInt('o1-v2.6.0 editor.lat', '205µs')}，拿 ${nInt('o1-v2.6.0 editor.share', '12.7%')} 的 CPU。最久的兩次等待（9ms、${nInt('o1-v2.6.0 editor.max', '31ms')}）都在前 50ms：cc 剛從 shell fork 出來，繼承了 shell 的 sleep_avg，優先權和 editor 差不多，editor 搶不贏。`, `O(1) 2.6.0 guesses from sleep_avg that the editor is interactive (bonus +5, prio 115); on wakeup it usually interrupts cc at once, waits only ${nInt('o1-v2.6.0 editor.lat', '205µs')} on average and takes ${nInt('o1-v2.6.0 editor.share', '12.7%')} of the CPU. The two longest waits (9ms and ${nInt('o1-v2.6.0 editor.max', '31ms')}) are in the first 50ms: cc was just forked from the shell and inherited its sleep_avg, so its priority was close to the editor's and the editor could not win.`),
+        text: tr(`O(1) 2.6.0 從 sleep_avg 猜出 editor 是互動型（bonus +5，prio 115），醒來大多立刻打斷 cc，平均只等 ${nInt('o1-v2.6.0 editor.lat', '205µs')}，拿 ${nInt('o1-v2.6.0 editor.share', '12.7%')} 的 CPU。最久的兩次等待（${nInt('o1-v2.6.0 editor.max', '29ms')}、11ms）是頭兩次喚醒：cc 剛從 shell fork 出來，繼承了 shell 的 sleep_avg，優先權和 editor 差不多，editor 搶不贏。`, `O(1) 2.6.0 guesses from sleep_avg that the editor is interactive (bonus +5, prio 115); on wakeup it usually interrupts cc at once, waits only ${nInt('o1-v2.6.0 editor.lat', '205µs')} on average and takes ${nInt('o1-v2.6.0 editor.share', '12.7%')} of the CPU. The two longest waits (${nInt('o1-v2.6.0 editor.max', '29ms')} and 11ms) are the first two wakeups: cc was just forked from the shell and inherited its sleep_avg, so its priority was close to the editor's and the editor could not win.`),
       },
       {
         variant: 'on-v2.4.0',
@@ -193,10 +193,10 @@ export const scenarios: Scenario[] = [
         variant: 'eevdf-v6.12-slice',
         key: 'DELAY_DEQUEUE',
         task: 0,
-        note: tr('數字變得和 v6.6 一樣：v6.12 的 editor 少等的那段全部來自 DELAY_DEQUEUE。睡前的負 lag 在睡著時就還掉，醒來比較常是 eligible；代價是預設值下 lag 圖往下走，editor 拿得比公平的份多一點。', 'The numbers become the same as v6.6: all of the editor\'s shorter waits in v6.12 come from DELAY_DEQUEUE. Its negative lag from before sleeping is paid back while it sleeps, so it is eligible more often when it wakes; the price is that with the defaults the lag line goes down and the editor takes a little more than its fair share.'),
+        note: tr('數字變得和 v6.6 一樣：對 editor 來說，v6.12 和 v6.6 只差在 DELAY_DEQUEUE。開著它，睡前的負 lag 在睡著時就還掉，editor 醒來都是 eligible；但要立刻搶到 CPU，deadline 還得比 cc 早，否則照樣等到下一個 tick。所以平均等待不一定變短，會隨週期和 tick 的相對位置忽多忽少，這個情境裡反而多等一點。代價是預設值下 lag 圖往下走，editor 拿得比公平的份多一點。', 'The numbers become the same as v6.6: for the editor, DELAY_DEQUEUE is the only difference between v6.12 and v6.6. With it on, the negative lag from before sleeping is paid back while the editor sleeps, so it is always eligible when it wakes; but to get the CPU at once its deadline must also be earlier than cc\'s, otherwise it still waits for the next tick. So the average wait is not necessarily shorter: it goes up or down with the position of the period relative to the tick, and in this scenario it is slightly longer. The price is that with the defaults the lag line goes down and the editor takes a little more than its fair share.'),
       },
     ],
-    tasks: [{ name: 'editor', nice: 0, pattern: [{ run: 1.3 * MS, sleep: 8.7 * MS }] }, hog('cc1'), hog('cc2')],
+    tasks: [{ name: 'editor', nice: 0, pattern: [{ run: 1.3 * MS, sleep: 8.73 * MS }] }, hog('cc1'), hog('cc2')],
   },
   {
     id: 'cheat',

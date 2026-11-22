@@ -188,7 +188,7 @@ function arraysWidget(box: HTMLElement): void {
 // sleep_avg：跑 r、睡 s，重複 3 秒
 
 const PRESETS = [
-  { label: tr('編輯器：跑 1.3、睡 8.7', 'editor: run 1.3, sleep 8.7'), r: 1.3, s: 8.7 },
+  { label: tr('編輯器：跑 1.3、睡 8.73', 'editor: run 1.3, sleep 8.73'), r: 1.3, s: 8.73 },
   { label: tr('cheat：跑 2.3、睡 0.83', 'cheat: run 2.3, sleep 0.83'), r: 2.3, s: 0.83 },
   { label: tr('跑 3、睡 0.8', 'run 3, sleep 0.8'), r: 3, s: 0.8 },
 ];
