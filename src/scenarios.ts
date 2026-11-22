@@ -175,7 +175,7 @@ export const scenarios: Scenario[] = [
         variant: 'o1-v2.6.0',
         key: 'sleep_avg',
         task: 0,
-        note: tr('少了 bonus，editor 和 cc 同優先權，醒來不能插隊，只能排在 cc 後面等一整個時間片（約 100ms）。2.6.0 照顧互動型程式的手段只有 sleep_avg 這一個，拿掉之後比 2.4 還糟。', 'Without the bonus, the editor and cc have the same priority; the editor cannot preempt on wakeup and has to queue behind cc for a whole time slice (about 100ms). sleep_avg is the only tool 2.6.0 has for interactive tasks, and without it things are worse than in 2.4.'),
+        note: tr('少了 bonus，editor 和 cc 同優先權，醒來不能插隊，只能排在兩個 cc 後面，等它們各用完一整個時間片（每個約 100ms）。2.6.0 照顧互動型程式的手段只有 sleep_avg 這一個，拿掉之後比 2.4 還糟。', 'Without the bonus, the editor and cc have the same priority; the editor cannot preempt on wakeup and has to queue behind both cc tasks until each has used up a whole time slice (about 100ms each). sleep_avg is the only tool 2.6.0 has for interactive tasks, and without it things are worse than in 2.4.'),
       },
       {
         variant: 'on-v2.4.0',
@@ -250,7 +250,7 @@ export const scenarios: Scenario[] = [
         variant: 'o1-v2.6.0',
         key: 'sleep_avg',
         task: 0,
-        note: tr('不會被騙了，但矯枉過正：cheat 沒有 bonus，和 cc 同優先權，醒來不能插隊，只能排在 cc 後面等一整個時間片（約 100ms）；每次只跑 2.3ms 就去睡，醒來又得重新排隊。真正的互動型程式也會一起失去照顧，可以到「打字和編譯」關掉同一個開關看 editor。', 'No longer fooled, but it overcorrects: cheat has no bonus and the same priority as cc, cannot preempt on wakeup, and queues behind cc for a whole time slice (about 100ms); it runs only 2.3ms before sleeping and has to queue all over again when it wakes. Truly interactive tasks lose their help too; try turning off the same switch in "Typing while compiling" and watch the editor.'),
+        note: tr('不會被騙了，但矯枉過正：cheat 沒有 bonus，和 cc 同優先權，醒來不能插隊，只能排在兩個 cc 後面，等它們各用完一整個時間片（每個約 100ms）；每次只跑 2.3ms 就去睡，醒來又得重新排隊。真正的互動型程式也會一起失去照顧，可以到「打字和編譯」關掉同一個開關看 editor。', 'No longer fooled, but it overcorrects: cheat has no bonus and the same priority as cc, cannot preempt on wakeup, and queues behind both cc tasks until each has used up a whole time slice (about 100ms each); it runs only 2.3ms before sleeping and has to queue all over again when it wakes. Truly interactive tasks lose their help too; try turning off the same switch in "Typing while compiling" and watch the editor.'),
       },
       {
         variant: 'o1-v2.6.0',

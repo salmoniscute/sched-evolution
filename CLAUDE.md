@@ -223,4 +223,5 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
   - 發現：原本 8.7ms 時 EEVDF 的 editor 每次醒來都碰上 tick，`need_resched` 已設好，一次都沒進到 `check_preempt_wakeup`。
   - 數字更新：CFS editor 12.8%、1 秒 lag −74.4ms；EEVDF v6.6 平均等 660µs、v6.12 719µs；O(1) 最久的兩次是頭兩次喚醒（29ms、11ms）。
   - 發現：v6.12 的 `DELAY_DEQUEUE` 讓 editor 醒來都 eligible（v6.6 有 60/158 次不 eligible），但立刻搶到的次數反而少（40 vs 49），平均等待隨相位擺動（睡 8.7–8.9ms 之間，v6.12 − v6.6 從 −517µs 到 +59µs），不是固定變短。開關說明已改寫。
-  - 待辦：O(1) 關掉 `sleep_avg` 的說明寫「等一整個時間片（約 100ms）」，實測平均 185ms、最久 195ms（改之前就是這樣）。
+  - O(1) 關掉 `sleep_avg` 的說明原本寫「等一整個時間片（約 100ms）」，實測平均 185–193ms：醒來排在兩個 cc 後面，等兩個時間片。已改。
+- 2026-11-21：全站校對（對照 `kernel-src/` 與重跑模擬）後修正：第 7 章情境 5 的誤差改成 2 秒的 0.2 個百分點（0.01% 是 notes/02 跑 10 秒的數字）；第 7 章情境 2 的 editor 沒有長睡，是前幾次醒來 vruntime 往左漂後才貼住 −20ms；名詞表的 HZ 改成「2.6.13 起可選、預設 250，本站用 1000」；`JUST_INTERACTIVE_SLEEP` 的 918ms 是 bonus +4，不是剛好夠；第 9 章 RUN_TO_PARITY 例子的放置補上 (W + w)/W 放大；第 4 章註明 goodness 的同 mm +1 分。

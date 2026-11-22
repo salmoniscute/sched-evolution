@@ -354,7 +354,7 @@
         <h2>名字裡的 O(1)</h2>
         <p>先看它取代的 2.4（O(n)）。2.4 每次 <code>schedule()</code> 都把 runqueue 上的 task 全部走過一遍，用 <code>goodness()</code> 打分數，挑最高的：</p>
         <div class="tex-block">\text{goodness}_i = \text{counter}_i + 20 - \text{nice}_i</div>
-        <p><code>counter</code> 是剩下的時間片（以 tick 計），用完時 goodness 是 0，不會被挑。runqueue 上有 <span class="tex">n</span> 個 task，每次挑選就要算 <span class="tex">n</span> 次；所有 runnable task 的 counter 都用完時，還要走過系統上的每一個 task 重新發時間片。task 一多，CPU scheduler 自己就成了負擔。</p>
+        <p><code>counter</code> 是剩下的時間片（以 tick 計），用完時 goodness 是 0，不會被挑。和目前 CPU 上的 task 共用同一個 mm（位址空間）的，另外再加 1 分；這一分會影響醒來時能不能插隊，以下的公式略過。runqueue 上有 <span class="tex">n</span> 個 task，每次挑選就要算 <span class="tex">n</span> 次；所有 runnable task 的 counter 都用完時，還要走過系統上的每一個 task 重新發時間片。task 一多，CPU scheduler 自己就成了負擔。</p>
         <p>O(1) 把 140 級優先權各放一條佇列，再用一個 140 位元的 bitmap 記錄哪幾級有 task。數字越小越優先，挑選就是找第一個非空的佇列，取它的隊首：</p>
         <div class="tex-block">p^{*} = \min\{\, p \mid \text{queue}[p] \ne \varnothing \,\}</div>
         <p>這一步由 <code>sched_find_first_bit()</code> 在 bitmap 上找第一個 1，步數固定，和 task 有幾個無關，這就是名字裡的 O(1)。</p>
@@ -420,7 +420,7 @@
         <h2>The O(1) in the name</h2>
         <p>First, the 2.4 scheduler it replaced (O(n)). On every <code>schedule()</code>, 2.4 walks all tasks on the runqueue, scores each with <code>goodness()</code> and picks the highest:</p>
         <div class="tex-block">\text{goodness}_i = \text{counter}_i + 20 - \text{nice}_i</div>
-        <p><code>counter</code> is the remaining time slice (in ticks); once it runs out, goodness is 0 and the task is not picked. With <span class="tex">n</span> tasks on the runqueue, each pick computes the score <span class="tex">n</span> times, and when the counters of all runnable tasks are used up, it walks every task in the system to hand out new time slices. With many tasks, the CPU scheduler itself becomes the burden.</p>
+        <p><code>counter</code> is the remaining time slice (in ticks); once it runs out, goodness is 0 and the task is not picked. A task that shares the mm (address space) of the task currently on the CPU gets 1 extra point; that point matters for whether a waking task can preempt, but the formulas here leave it out. With <span class="tex">n</span> tasks on the runqueue, each pick computes the score <span class="tex">n</span> times, and when the counters of all runnable tasks are used up, it walks every task in the system to hand out new time slices. With many tasks, the CPU scheduler itself becomes the burden.</p>
         <p>O(1) gives each of the 140 priority levels its own queue and keeps a 140-bit bitmap of which levels have tasks. Smaller numbers are higher priority, so picking means finding the first non-empty queue and taking its head:</p>
         <div class="tex-block">p^{*} = \min\{\, p \mid \text{queue}[p] \ne \varnothing \,\}</div>
         <p><code>sched_find_first_bit()</code> does this by finding the first 1 in the bitmap, in a fixed number of steps no matter how many tasks there are. That is the O(1) in the name.</p>
@@ -519,7 +519,7 @@
         <table class="mini eq-ex wrap rules">
           <thead><tr><th>規則</th><th>做什麼</th><th>防的是</th></tr></thead>
           <tbody>
-            <tr><td><code>JUST_INTERACTIVE_SLEEP</code></td><td>睡超過 815ms（nice 0）的，<code>sleep_avg</code> 直接設成 918ms，剛好夠 interactive，不給滿</td><td>睡很久的 task 醒來後變成 CPU-bound，帶著滿分 bonus 餓死別人</td></tr>
+            <tr><td><code>JUST_INTERACTIVE_SLEEP</code></td><td>睡超過 815ms（nice 0）的，<code>sleep_avg</code> 直接設成 918ms（bonus +4），夠 interactive，但不給滿</td><td>睡很久的 task 醒來後變成 CPU-bound，帶著滿分 bonus 餓死別人</td></tr>
             <tr><td><code>interactive_credit</code></td><td><code>sleep_avg</code> 加到滿一次記 +1，扣到 0 一次記 −1。credit 高的跑時扣得少，credit 低的一次睡眠最多只算一個時間片</td><td>偶爾睡一下的 CPU-bound task 拿到 bonus；真正的 interactive task 一忙起來就掉出去</td></tr>
             <tr><td><code>activated = -1</code></td><td>從 uninterruptible sleep（多半是等磁碟）醒來的，<code>sleep_avg</code> 最多加到 <code>JUST_INTERACTIVE_SLEEP</code></td><td>註解寫的 “likely to be cpu hogs waiting on I/O”</td></tr>
             <tr><td><code>ON_RUNQUEUE_WEIGHT</code></td><td>醒來後在 runqueue 上等的時間也算睡眠；被中斷叫醒的全算，被其他 task 叫醒的只算 30%</td><td>醒來後等太久的 interactive task 被扣分</td></tr>
@@ -591,7 +591,7 @@
         <table class="mini eq-ex wrap rules">
           <thead><tr><th>Rule</th><th>What it does</th><th>What it guards against</th></tr></thead>
           <tbody>
-            <tr><td><code>JUST_INTERACTIVE_SLEEP</code></td><td>A task that slept over 815ms (nice 0) gets <code>sleep_avg</code> set straight to 918ms, just enough to be interactive, not full marks</td><td>A task that slept a long time becoming CPU-bound after waking and starving others with a full bonus</td></tr>
+            <tr><td><code>JUST_INTERACTIVE_SLEEP</code></td><td>A task that slept over 815ms (nice 0) gets <code>sleep_avg</code> set straight to 918ms (bonus +4): interactive, but not full marks</td><td>A task that slept a long time becoming CPU-bound after waking and starving others with a full bonus</td></tr>
             <tr><td><code>interactive_credit</code></td><td>+1 each time <code>sleep_avg</code> fills up, −1 each time it drains to 0. High credit means less is subtracted while running; low credit means one sleep counts for at most one time slice</td><td>CPU-bound tasks that sleep now and then getting a bonus; truly interactive tasks dropping out as soon as they get busy</td></tr>
             <tr><td><code>activated = -1</code></td><td>A task woken from uninterruptible sleep (usually waiting on disk) can raise <code>sleep_avg</code> at most to <code>JUST_INTERACTIVE_SLEEP</code></td><td>What the comment calls “likely to be cpu hogs waiting on I/O”</td></tr>
             <tr><td><code>ON_RUNQUEUE_WEIGHT</code></td><td>Time spent waiting on the runqueue after waking also counts as sleep; fully if woken by an interrupt, only 30% if woken by another task</td><td>Interactive tasks losing points because they waited long after waking</td></tr>
@@ -727,7 +727,7 @@
 
       <article class="card explain chapter" data-ch="why" data-title="為什麼離開 CFS" data-q="CFS 已經很公平了，為什麼還要換掉？" data-title-en="Why Linux moved on from CFS" data-q-en="CFS was already fair, so why replace it?">
         <p>先說清楚「離開」的範圍。v6.6 換掉的是 CFS 挑選、放置與搶占的規則，<code>sched_entity</code>、vruntime、紅黑樹、<code>kernel/sched/fair.c</code> 和 cgroup 的群組排程都還在；被拿掉的是「選 vruntime 最小的」這條規則，以及外面那一圈為了照顧延遲而長出來的 heuristics。</p>
-        <p>問題也不在公平。上一章推過，vruntime 相等就是公平，本站情境 5 量到的 CPU 比例和理論值相差不到 0.01%。CFS 的麻煩在於延遲沒有正式的位置，以下照 mailing list 上的討論，把理由一個一個拆開來看。</p>
+        <p>問題也不在公平。上一章推過，vruntime 相等就是公平，本站情境 5 跑 2 秒，三個 task 的 CPU 比例和理論值相差都不到 0.2 個百分點。CFS 的麻煩在於延遲沒有正式的位置，以下照 mailing list 上的討論，把理由一個一個拆開來看。</p>
 
         <h2>只有一個參數：權重</h2>
         <p>Peter Zijlstra 在合併進 kernel 的 EEVDF commit 裡，第一句話就是：</p>
@@ -757,7 +757,7 @@
           </tbody>
         </table>
         <p>這些規則各自都有道理，例如 v6.5 的註解寫 <code>GENTLE_FAIR_SLEEPERS</code> 是 “Only give sleepers 50% of their service deficit”。但它們疊在一起就很難分析：補償送多少、門檻設多大，都是調出來的經驗值，彼此還會互相影響。光是喚醒補償，從 v2.6.24 的 20ms 到 v6.5 的 <span class="tex">6\,\text{ms} \times \tfrac{1}{2} = 3\,\text{ms}</span>（單核時），數字就一路在變。</p>
-        <p>本站量到的結果也說明了這種補償有多粗：情境 2 跑 1 秒，CFS v2.6.24 下 editor 相對 GPS 的 lag 累積到 <span data-sim="interactive cfs-v2.6.24 @1s editor.lag">−74.4ms</span>，而且 editor 第一次長睡之後，每次醒來都貼著 −20ms 的上限，短睡也一樣。補償不管 task 睡前是被欠還是多拿，一律照送。Zijlstra 在第一版 EEVDF patch 的 cover letter 寫的就是想刪掉這些程式碼：“if we can pull this off we can delete a whole much of icky heuristics code”。最後合併的 commit「sched/fair: Commit to EEVDF」只有兩句說明：</p>
+        <p>本站量到的結果也說明了這種補償有多粗：情境 2 跑 1 秒，CFS v2.6.24 下 editor 相對 GPS 的 lag 累積到 <span data-sim="interactive cfs-v2.6.24 @1s editor.lag">−74.4ms</span>，而且 editor 每次只睡 8.73ms，前幾次醒來 vruntime 一路往左漂，之後每次醒來都貼著 −20ms 的上限。補償不管 task 睡前是被欠還是多拿，一律照送。Zijlstra 在第一版 EEVDF patch 的 cover letter 寫的就是想刪掉這些程式碼：“if we can pull this off we can delete a whole much of icky heuristics code”。最後合併的 commit「sched/fair: Commit to EEVDF」只有兩句說明：</p>
         <blockquote>EEVDF is a better defined scheduling policy, as a result it has less heuristics/tunables. There is no compelling reason to keep CFS around.</blockquote>
 
         <h2>先試過的路：latency-nice</h2>
@@ -798,7 +798,7 @@
         </details>
         <template lang="en">
         <p>First, what "moving on" covers. v6.6 replaced the rules CFS used for picking, placement and preemption. <code>sched_entity</code>, vruntime, the red-black tree, <code>kernel/sched/fair.c</code> and cgroup group scheduling are all still there. What was removed is the rule "pick the smallest vruntime" and the ring of heuristics that had grown around it to look after latency.</p>
-        <p>Fairness was not the problem either. The previous chapter showed that equal vruntime is fairness, and in scenario 5 the CPU shares measured on this site are within 0.01% of the theoretical values. The trouble with CFS is that latency has no proper place in it. Following the mailing-list discussions, this chapter takes the reasons apart one at a time.</p>
+        <p>Fairness was not the problem either. The previous chapter showed that equal vruntime is fairness, and in 2 seconds of scenario 5 on this site, the CPU shares of all three tasks are within 0.2 percentage points of the theoretical values. The trouble with CFS is that latency has no proper place in it. Following the mailing-list discussions, this chapter takes the reasons apart one at a time.</p>
 
         <h2>Only one knob: the weight</h2>
         <p>In the EEVDF commit merged into the kernel, the first sentence Peter Zijlstra wrote is:</p>
@@ -828,7 +828,7 @@
           </tbody>
         </table>
         <p>Each rule has its reasons; the v6.5 comment, for example, says <code>GENTLE_FAIR_SLEEPERS</code> is there to “Only give sleepers 50% of their service deficit”. Stacked together, though, they are hard to analyse: how big the bonus is and where the thresholds sit are tuned empirical values, and they interact with each other. The wakeup bonus alone went from 20ms in v2.6.24 to <span class="tex">6\,\text{ms} \times \tfrac{1}{2} = 3\,\text{ms}</span> in v6.5 (on a single core), changing all along the way.</p>
-        <p>What this site measures shows how crude this kind of bonus is: in 1 second of scenario 2 under CFS v2.6.24, the editor's lag relative to GPS accumulates to <span data-sim="interactive cfs-v2.6.24 @1s editor.lag">−74.4ms</span>, and after the editor's first long sleep, every wakeup lands right at the −20ms cap, even after short sleeps. The bonus is handed out regardless of whether the task was owed or had taken extra before sleeping. Deleting this code is exactly what Zijlstra wrote about in the cover letter of the first EEVDF patch set: “if we can pull this off we can delete a whole much of icky heuristics code”. The commit finally merged, "sched/fair: Commit to EEVDF", explains itself in two sentences:</p>
+        <p>What this site measures shows how crude this kind of bonus is: in 1 second of scenario 2 under CFS v2.6.24, the editor's lag relative to GPS accumulates to <span data-sim="interactive cfs-v2.6.24 @1s editor.lag">−74.4ms</span>, and although the editor only ever sleeps 8.73ms, its vruntime drifts left over the first few wakeups, and after that every wakeup lands right at the −20ms cap. The bonus is handed out regardless of whether the task was owed or had taken extra before sleeping. Deleting this code is exactly what Zijlstra wrote about in the cover letter of the first EEVDF patch set: “if we can pull this off we can delete a whole much of icky heuristics code”. The commit finally merged, "sched/fair: Commit to EEVDF", explains itself in two sentences:</p>
         <blockquote>EEVDF is a better defined scheduling policy, as a result it has less heuristics/tunables. There is no compelling reason to keep CFS around.</blockquote>
 
         <h2>The road tried first: latency-nice</h2>
@@ -1086,10 +1086,10 @@
 
         <h2>EEVDF 的 RUN_TO_PARITY</h2>
         <p>EEVDF 的喚醒搶占沒有固定門檻，而是直接問挑選規則：如果現在重新挑，<code>pick_eevdf()</code> 會不會選醒來的 task？會，就搶占。規則前後一致，但 curr 可能才跑一小段，就因為一個 deadline 更早的 task 醒來而被換下。<code>RUN_TO_PARITY</code> 的做法是：curr 被選中後，只要還 eligible，就讓它把這個 slice 跑完，期間不重新比 deadline。</p>
-        <p>在模擬頁關掉 <code>RUN_TO_PARITY</code>，結果幾乎不變（context switch <span data-sim="latency eevdf-v6.6 switches">1881</span> → <span data-sim="latency eevdf-v6.6 -RUN_TO_PARITY switches">1871</span>，audio 的延遲完全一樣）。原因是 v6.6 每個 task 的 slice 都是 0.75ms：curr 是在 eligible 時被選中的，deadline 最多是 <span class="tex">V + 0.75</span>；醒來的 task 若 lag 不大，被放在 V 附近，deadline 也在 <span class="tex">V + 0.75</span> 附近，就算重新比，多半還是 curr 的 deadline 比較早。這層保護真正擋下的，是 slice 比 curr 短的 task，所以 v6.12 讓 task 自訂 slice 時，同時加了 <code>PREEMPT_SHORT</code>：slice 比 curr 短的 task 醒來，可以取消 curr 的這層保護（<a class="chref" data-ref="slice"></a>）。</p>
+        <p>在模擬頁關掉 <code>RUN_TO_PARITY</code>，結果幾乎不變（context switch <span data-sim="latency eevdf-v6.6 switches">1881</span> → <span data-sim="latency eevdf-v6.6 -RUN_TO_PARITY switches">1871</span>，audio 的平均延遲差不到 1µs）。原因是 v6.6 每個 task 的 slice 都是 0.75ms：curr 是在 eligible 時被選中的，deadline 最多是 <span class="tex">V + 0.75</span>；醒來的 task 若 lag 不大，被放在 V 附近，deadline 也在 <span class="tex">V + 0.75</span> 附近，就算重新比，多半還是 curr 的 deadline 比較早。這層保護真正擋下的，是 slice 比 curr 短的 task，所以 v6.12 讓 task 自訂 slice 時，同時加了 <code>PREEMPT_SHORT</code>：slice 比 curr 短的 task 醒來，可以取消 curr 的這層保護（<a class="chref" data-ref="slice"></a>）。</p>
         <details class="deep">
           <summary>深入：用數字看 RUN_TO_PARITY 擋下了什麼</summary>
-          <p>三個 nice 0，單位 ms，假設這時 <span class="tex">V = 0</span>。B 在 <span class="tex">v = -0.3</span> 被選中，slice 0.75，deadline 是 0.45。跑了 0.2ms 之後，A 醒來，睡前帶著 +0.5 的 lag，被放在 <span class="tex">v = -0.5</span>，deadline 是 0.25。</p>
+          <p>三個 nice 0，單位 ms，數值都以 A 加入後的 <span class="tex">V</span> 為 0。B 在 <span class="tex">v = -0.3</span> 被選中，slice 0.75，deadline 是 0.45。跑了 0.2ms 之後，A 醒來，睡前帶著 +0.5 的 lag。<code>place_entity()</code> 先把 lag 放大再放（<a class="chref" data-ref="eevdf"></a>），所以 A 加入、<span class="tex">V</span> 往左移之後，它剛好落在 <span class="tex">V</span> 左邊 0.5，也就是 <span class="tex">v = -0.5</span>，deadline 是 0.25。</p>
           <table class="mini eq-ex">
             <thead><tr><th></th><th><span class="tex">v_i</span></th><th>eligible</th><th><span class="tex">d_i</span></th><th>關掉 RUN_TO_PARITY</th><th>開著</th></tr></thead>
             <tbody>
@@ -1129,10 +1129,10 @@
 
         <h2>RUN_TO_PARITY in EEVDF</h2>
         <p>EEVDF's wakeup preemption has no fixed threshold; it simply asks the picking rule: if we picked again now, would <code>pick_eevdf()</code> choose the woken task? If so, preempt. The rule is consistent, but curr may be switched out after running only a short stretch because a task with an earlier deadline woke up. <code>RUN_TO_PARITY</code> handles this: once curr has been picked, as long as it is still eligible, it is allowed to finish this slice without deadlines being compared again in the meantime.</p>
-        <p>Turning <code>RUN_TO_PARITY</code> off on the Simulate page changes almost nothing (context switches <span data-sim="latency eevdf-v6.6 switches">1881</span> → <span data-sim="latency eevdf-v6.6 -RUN_TO_PARITY switches">1871</span>, and audio's latency is exactly the same). The reason is that in v6.6 every task's slice is 0.75ms. curr was picked while eligible, so its deadline is at most <span class="tex">V + 0.75</span>; a woken task without much lag is placed near V, with its deadline also near <span class="tex">V + 0.75</span>, so even comparing again, curr usually still has the earlier deadline. What this protection really holds back are tasks with a shorter slice than curr's. That is why v6.12, when it let tasks set their own slice, also added <code>PREEMPT_SHORT</code>: a waking task with a shorter slice than curr's can cancel this protection (<a class="chref" data-ref="slice"></a>).</p>
+        <p>Turning <code>RUN_TO_PARITY</code> off on the Simulate page changes almost nothing (context switches <span data-sim="latency eevdf-v6.6 switches">1881</span> → <span data-sim="latency eevdf-v6.6 -RUN_TO_PARITY switches">1871</span>, and audio's average latency differs by less than 1µs). The reason is that in v6.6 every task's slice is 0.75ms. curr was picked while eligible, so its deadline is at most <span class="tex">V + 0.75</span>; a woken task without much lag is placed near V, with its deadline also near <span class="tex">V + 0.75</span>, so even comparing again, curr usually still has the earlier deadline. What this protection really holds back are tasks with a shorter slice than curr's. That is why v6.12, when it let tasks set their own slice, also added <code>PREEMPT_SHORT</code>: a waking task with a shorter slice than curr's can cancel this protection (<a class="chref" data-ref="slice"></a>).</p>
         <details class="deep">
           <summary>Deeper: what RUN_TO_PARITY holds back, in numbers</summary>
-          <p>Three nice 0 tasks, units in ms, and suppose <span class="tex">V = 0</span> at this moment. B was picked at <span class="tex">v = -0.3</span> with a 0.75 slice, so its deadline is 0.45. After it has run 0.2ms, A wakes up; it went to sleep with a lag of +0.5, so it is placed at <span class="tex">v = -0.5</span> with a deadline of 0.25.</p>
+          <p>Three nice 0 tasks, units in ms, with all values measured from <span class="tex">V</span> after A has joined. B was picked at <span class="tex">v = -0.3</span> with a 0.75 slice, so its deadline is 0.45. After it has run 0.2ms, A wakes up; it went to sleep with a lag of +0.5. <code>place_entity()</code> scales the lag up before placing it (<a class="chref" data-ref="eevdf"></a>), so once A has joined and <span class="tex">V</span> has moved left, A sits exactly 0.5 left of <span class="tex">V</span>, at <span class="tex">v = -0.5</span>, with a deadline of 0.25.</p>
           <table class="mini eq-ex">
             <thead><tr><th></th><th><span class="tex">v_i</span></th><th>eligible</th><th><span class="tex">d_i</span></th><th>RUN_TO_PARITY off</th><th>on</th></tr></thead>
             <tbody>
@@ -1177,7 +1177,7 @@
         <p>正好是表裡的 <span data-sim="latency eevdf-v6.12-slice -DELAY_DEQUEUE audio.lat">620µs</span>。照帳本來說這不算錯：audio 剛剛確實多拿了，本來就該等別人追上來。問題出在時機。audio 一睡就是 4.73ms，別人早就追上來了，可是帳本在它睡著時凍結，這段時間沒有算進去。</p>
         <p><code>DELAY_DEQUEUE</code> 讓帳本在睡著時繼續算。task 去睡時如果不 eligible，<code>dequeue_entity()</code> 先不把它移出 runqueue，只標記為 <code>sched_delayed</code>，讓它留在樹上繼續參與競爭。它不會真的執行，但 <span class="tex">V</span> 繼續往前，它的 lag 跟著往上爬。等到它被 <code>pick_eevdf()</code> 選中，lag 一定已經 ≥ 0，kernel 這時才真正把它移出，<code>DELAY_ZERO</code> 再把正的 lag 截成 0。<code>kernel/sched/features.h</code> 的說明是：</p>
         <blockquote>By delaying the dequeue for non-eligible tasks, they remain in the competition and can burn off their negative lag. When they get selected they'll have positive lag by definition.</blockquote>
-        <p>audio 的 0.62ms 債，在 4.73ms 的睡眠一開始就還完了，醒來時 lag 是 0，eligible，兩關都過。勾選下面的開關，看 audio 一個週期內的 lag 怎麼走，以及醒來時卡在哪一個條件：</p>
+        <p>audio 欠的 0.21ms lag，在 4.73ms 的睡眠開始後約 0.62ms 就還完了，醒來時 lag 是 0，eligible，兩關都過。勾選下面的開關，看 audio 一個週期內的 lag 怎麼走，以及醒來時卡在哪一個條件：</p>
         <div class="widget" id="w-v612"></div>
         <p class="try">先只開 custom slice 和 <code>PREEMPT_SHORT</code>（預設），audio 醒來時在 eligible 區域外面，要排 <span data-sim="latency eevdf-v6.12-slice -DELAY_DEQUEUE audio.lat">620µs</span>。打開 <code>DELAY_DEQUEUE</code>，睡著後那一小段線會爬回 0，醒來就能馬上跑。再關掉 custom slice：lag 一樣是 0，卻因為 slice 不比 cc 短，照樣要等。</p>
         <p class="fine">簡化：lag 曲線是三個 nice 0、穩定狀態下的玩具模型，「eligible 但不能插隊」時的排隊長度取自下面模擬的平均值。下面的延遲與 CPU 比例是用模擬核心跑情境 4 兩秒得到的。</p>
@@ -1222,7 +1222,7 @@
         <p>That is exactly the <span data-sim="latency eevdf-v6.12-slice -DELAY_DEQUEUE audio.lat">620µs</span> in the table. By the books this is not wrong: audio did just take more than its share, and it ought to wait for the others to catch up. The problem is the timing. audio sleeps for 4.73ms each time, and the others caught up long ago, but the books are frozen while it sleeps, so that time is not counted.</p>
         <p><code>DELAY_DEQUEUE</code> keeps the books running while the task sleeps. If a task is not eligible when it goes to sleep, <code>dequeue_entity()</code> does not take it off the runqueue yet; it only marks it <code>sched_delayed</code> and leaves it in the tree to keep competing. It never actually runs, but <span class="tex">V</span> keeps moving forward and its lag climbs with it. When <code>pick_eevdf()</code> eventually picks it, its lag must already be ≥ 0, and only then does the kernel really remove it, with <code>DELAY_ZERO</code> cutting any positive lag to 0. The description in <code>kernel/sched/features.h</code> is:</p>
         <blockquote>By delaying the dequeue for non-eligible tasks, they remain in the competition and can burn off their negative lag. When they get selected they'll have positive lag by definition.</blockquote>
-        <p>audio's 0.62ms debt is paid off right at the start of its 4.73ms sleep; it wakes up with lag 0, eligible, and clears both hurdles. Tick the switches below to see how audio's lag moves over one period, and which condition it gets stuck on when it wakes:</p>
+        <p>audio's 0.21ms of negative lag is paid off about 0.62ms into its 4.73ms sleep; it wakes up with lag 0, eligible, and clears both hurdles. Tick the switches below to see how audio's lag moves over one period, and which condition it gets stuck on when it wakes:</p>
         <div class="widget" id="w-v612"></div>
         <p class="try">Start with only custom slice and <code>PREEMPT_SHORT</code> on (the default): audio wakes outside the eligible zone and waits <span data-sim="latency eevdf-v6.12-slice -DELAY_DEQUEUE audio.lat">620µs</span>. Turn on <code>DELAY_DEQUEUE</code>, and the short stretch of line after it falls asleep climbs back to 0, so it can run as soon as it wakes. Then turn off custom slice: the lag is still 0, but since its slice is no shorter than cc's, it has to wait anyway.</p>
         <p class="fine">Simplifications: the lag curve is a toy model of three nice 0 tasks in steady state, and the queueing time in the "eligible but cannot jump the queue" case is taken from the average in the simulation below. The latency and CPU share below come from running scenario 4 for two seconds in the simulator.</p>

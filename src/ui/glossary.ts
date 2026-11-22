@@ -45,12 +45,12 @@ const raw: { zh: TermText; en: TermText }[] = [
     zh: {
       name: 'tick',
       match: ['tick'],
-      def: '週期性的時鐘中斷。2.6 以後 HZ=1000，每 1ms 一次；2.4 是 HZ=100，每 10ms 一次。排程器在 tick 時檢查 curr 是不是跑太久了。沒有人睡覺或醒來的話，換人只會發生在 tick 上，所以 EEVDF 0.75ms 的 slice 實際上會跑到 1ms。',
+      def: '週期性的時鐘中斷。本站的 2.4 用 HZ=100（每 10ms 一次），其他都用 HZ=1000（每 1ms 一次）。排程器在 tick 時檢查 curr 是不是跑太久了。沒有人睡覺或醒來的話，換人只會發生在 tick 上，所以 HZ=1000 時 EEVDF 0.75ms 的 slice 實際上會跑到 1ms；HZ=250 時是 4ms。',
     },
     en: {
       name: 'tick',
       match: ['tick'],
-      def: 'The periodic timer interrupt. From 2.6 on HZ=1000, one every 1ms; in 2.4 HZ=100, one every 10ms. At a tick the scheduler checks whether curr has run too long. If nobody sleeps or wakes up, switches only happen at ticks, which is why EEVDF\'s 0.75ms slice actually runs for 1ms.',
+      def: 'The periodic timer interrupt. On this site 2.4 uses HZ=100 (one every 10ms) and everything else HZ=1000 (one every 1ms). At a tick the scheduler checks whether curr has run too long. If nobody sleeps or wakes up, switches only happen at ticks, which is why with HZ=1000 EEVDF\'s 0.75ms slice actually runs for 1ms; with HZ=250 it would be 4ms.',
     },
   },
   {
@@ -225,12 +225,12 @@ const raw: { zh: TermText; en: TermText }[] = [
     zh: {
       name: 'HZ 與 jiffies',
       match: ['HZ', 'jiffies'],
-      def: 'HZ 是每秒幾次 tick：2.4 的 i386 預設 100（每 10ms 一次），2.6 起預設 1000（每 1ms 一次）。jiffies 是開機以來的 tick 數，O(n) 與 O(1) 用它計時。',
+      def: 'HZ 是每秒幾次 tick：2.4 的 i386 預設 100（每 10ms 一次），2.6.0 是 1000（每 1ms 一次）；2.6.13 起改成編譯時選 100、250、300 或 1000，預設 250。本站的 CFS 與 EEVDF 一律用 1000。jiffies 是開機以來的 tick 數，O(n) 與 O(1) 用它計時。',
     },
     en: {
       name: 'HZ and jiffies',
       match: ['HZ', 'jiffies'],
-      def: 'HZ is the number of ticks per second: 100 by default on i386 in 2.4 (one every 10ms), 1000 from 2.6 on (one every 1ms). jiffies is the number of ticks since boot; O(n) and O(1) use it to keep time.',
+      def: 'HZ is the number of ticks per second: 100 by default on i386 in 2.4 (one every 10ms) and 1000 in 2.6.0 (one every 1ms); from 2.6.13 it is chosen at build time from 100, 250, 300 or 1000, with 250 as the default. On this site CFS and EEVDF always use 1000. jiffies is the number of ticks since boot; O(n) and O(1) use it to keep time.',
     },
   },
   {
