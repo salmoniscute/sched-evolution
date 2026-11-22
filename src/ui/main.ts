@@ -881,7 +881,6 @@ function applyLanguage(): void {
   btn.lang = isEn ? 'zh-Hant' : 'en';
   btn.title = isEn ? '切換成中文' : 'Switch to English';
   btn.addEventListener('click', () => setLang(isEn ? 'zh' : 'en'));
-  for (const b of document.querySelectorAll<HTMLButtonElement>('[data-lang]')) b.addEventListener('click', () => setLang(b.dataset.lang as 'zh' | 'en'));
   if (!isEn) return;
   document.documentElement.lang = 'en';
   for (const el of document.querySelectorAll<HTMLElement>('[data-en]')) el.textContent = el.dataset.en!;
@@ -889,19 +888,7 @@ function applyLanguage(): void {
   for (const el of document.querySelectorAll<HTMLElement>('[data-en-aria]')) el.setAttribute('aria-label', el.dataset.enAria!);
   // 大段的內文（介紹頁、學習路線各章）：<article> 的最後一個子元素是 <template lang="en">，整篇換成英文版。
   // 要在小圖掛上去之前換，小圖的容器（id）兩個版本都有。
-  for (const t of document.querySelectorAll<HTMLTemplateElement>('article > template[lang="en"]')) {
-    const a = t.parentElement!;
-    a.replaceChildren(t.content);
-    a.classList.add('en-done');
-  }
-}
-/** 還沒翻成英文的頁面（英文模式下顯示提示）。介紹頁與學習路線以 <article> 為單位，有英文版的會帶 .en-done */
-const UNTRANSLATED = new Set(['source']);
-function untranslatedNow(page: string, chapter: string | undefined): boolean {
-  if (!isEn) return false;
-  if (page === 'learn') return !document.querySelector(`#page-learn article.chapter[data-ch="${chapter}"]`)?.classList.contains('en-done');
-  if (page === 'intro') return !document.querySelector('#page-intro article')?.classList.contains('en-done');
-  return UNTRANSLATED.has(page);
+  for (const t of document.querySelectorAll<HTMLTemplateElement>('article > template[lang="en"]')) t.parentElement!.replaceChildren(t.content);
 }
 
 // ---- 分頁（#/intro、#/learn/<章>、#/sim、#/source）
@@ -914,9 +901,8 @@ function route(): void {
     history.replaceState(null, '', `#/${path}`);
   }
   const [page, sub] = path.split('/') as [string, string | undefined];
-  let ch: string | undefined;
   if (page === 'learn') {
-    ch = showChapter(sub);
+    const ch = showChapter(sub);
     if (ch !== sub) history.replaceState(null, '', `#/learn/${ch}`);
   } else document.title = tr('排程器演進模擬', 'CPU scheduler evolution');
   // #/sim/<情境 id>：從學習路線直接開某個情境
@@ -930,7 +916,6 @@ function route(): void {
   for (const el of document.querySelectorAll<HTMLElement>('.page')) el.hidden = el.id !== `page-${page}`;
   for (const a of document.querySelectorAll<HTMLAnchorElement>('nav a')) a.classList.toggle('active', a.dataset.page === page);
   for (const el of document.querySelectorAll<HTMLElement>('[data-for]')) el.hidden = el.dataset.for !== page;
-  $('untranslated').hidden = !untranslatedNow(page, ch);
   if (page === 'sim') draw(); // 隱藏時 canvas 寬度是 0，顯示後要重畫
   if (page === 'source') mountSourcePage(document.getElementById('page-source')!);
   window.scrollTo(0, 0);

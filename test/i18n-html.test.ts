@@ -77,8 +77,7 @@ test('內文以外的固定文字都有 data-en', () => {
     for (const [attr, en] of [['title', 'data-en-title'], ['aria-label', 'data-en-aria']])
       if (new RegExp(`\\b${attr}="[^"]*${CJK.source}`).test(attrs) && !attrs.includes(`${en}="`)) bad.push(`${attr}: ${attrs.trim()}`);
   }
-  // 切換回中文的按鈕本來就是中文
-  expect(bad.filter((b) => b !== '切換成中文')).toEqual([]);
+  expect(bad).toEqual([]);
 });
 
 /** 從 s[i] 的引號開始，跳過一個字串字面值（含 `${…}` 裡的巢狀字串），回傳結尾之後的位置 */
@@ -119,6 +118,9 @@ function untranslated(src: string): string[] {
     if (/[\w$.]/.test(s[i - 1] ?? '') === false && m.exec(s) && /['"`]/.test(s[m.lastIndex]!)) {
       out += 'tr(_';
       i = skipString(s, m.lastIndex);
+      // 第一個參數可能是幾個字串用 + 接起來的
+      for (let c = /^\s*\+\s*(?=['"`])/.exec(s.slice(i)); c; c = /^\s*\+\s*(?=['"`])/.exec(s.slice(i)))
+        i = skipString(s, i + c[0].length);
     } else out += s[i++];
   }
   s = out.replace(/throw new Error\([^\n]*\n?/g, '');
@@ -128,7 +130,7 @@ function untranslated(src: string): string[] {
 /** 要檢查的檔案：小圖與原始碼頁。模擬頁、名詞表、決策說明另有 test/i18n.test.ts 實際產生字串來檢查 */
 const TS_FILES = ['learn.ts', 'start.ts', 'o1-widgets.ts', 'eevdf-widgets.ts', 'cost-widget.ts', 'source.ts', 'tour.ts'];
 /** 還沒翻的（翻完一個就從這裡拿掉） */
-const PENDING_TS = new Set<string>(['source.ts']);
+const PENDING_TS = new Set<string>([]);
 
 describe.each(TS_FILES.filter((f) => !PENDING_TS.has(f)).map((f) => [f]))('src/ui/%s', (f) => {
   test('讀者看得到的字串都經過 tr()', () => {
@@ -141,4 +143,6 @@ test('掃描器：tr() 的中文參數不算，其他的中文算', () => {
   expect(untranslated('x = tr(`a ${f(`巢狀`)} 中`, `en`);')).toEqual([]);
   expect(untranslated("x = '沒翻';")).toEqual(["x = '沒翻';"]);
   expect(untranslated("x = tr('中', '還是中文');")).toHaveLength(1);
+  expect(untranslated("x = tr('中' +\n  '文', 'en');")).toEqual([]);
+  expect(untranslated("x = tr('中' + y, '文');")).toHaveLength(1);
 });

@@ -8,6 +8,7 @@ import type { Snippet } from '../source/extract.ts';
 import snippetData from '../source/snippets.json';
 import { CfsV2_6_24 } from '../sched/cfs-v2.6.24.ts';
 import { EevdfV6_6 } from '../sched/eevdf-v6.6.ts';
+import { tr } from '../i18n.ts';
 import { linkTerms, linkTermsIn } from './glossary.ts';
 import { tex } from './math.ts';
 
@@ -200,7 +201,8 @@ function codeBlock(sn: Snippet, opts: CodeOpts): HTMLElement {
       while (i < sn.lines.length && !visible[i]) i++;
       const hidden: HTMLElement[] = [];
       for (let j = from; j < i; j++) hidden.push(lineEl(sn, j, toks[j]!, undefined));
-      const fold = h('button', 'fold', `⋯ 展開 ${i - from} 行（${sn.start + from}–${sn.start + i - 1}）`);
+      const range = `${sn.start + from}–${sn.start + i - 1}`;
+      const fold = h('button', 'fold', tr(`⋯ 展開 ${i - from} 行（${range}）`, `⋯ show ${i - from} more lines (${range})`));
       fold.type = 'button';
       fold.addEventListener('click', () => fold.replaceWith(...hidden));
       pre.append(fold);
@@ -263,19 +265,19 @@ function numberLine(ref: string, pts: Pt[]): HTMLElement {
   const merged: Pt[] = [];
   for (const p of pts) {
     const same = merged.find((m) => Math.abs(m.x - p.x) < span * 0.01);
-    if (same) same.label += '＝' + p.label;
+    if (same) same.label += tr('＝', ' = ') + p.label;
     else merged.push({ ...p });
   }
   merged.sort((a, b) => a.x - b.x);
 
-  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="editor 相對 ${esc(ref)} 的位置">`;
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${tr(`editor 相對 ${esc(ref)} 的位置`, `Position of editor relative to ${esc(ref)}`)}">`;
   svg += `<line class="axis" x1="${pad}" x2="${W - pad}" y1="40" y2="40"/>`;
   for (const v of [-span / 1.15, 0, span / 1.15]) {
     svg += `<line class="tick" x1="${X(v)}" x2="${X(v)}" y1="36" y2="44"/>`;
     svg += `<text class="tlabel" x="${X(v)}" y="60" text-anchor="middle">${v === 0 ? esc(ref) : sms(v, 2)}</text>`;
   }
-  svg += `<text class="dir" x="${pad}" y="72" text-anchor="start">← 先跑</text>`;
-  svg += `<text class="dir" x="${W - pad}" y="72" text-anchor="end">後跑 →</text>`;
+  svg += `<text class="dir" x="${pad}" y="72" text-anchor="start">${tr('← 先跑', '← runs sooner')}</text>`;
+  svg += `<text class="dir" x="${W - pad}" y="72" text-anchor="end">${tr('後跑 →', 'runs later →')}</text>`;
   merged.forEach((p, i) => {
     const y = i % 2 ? 14 : 26;
     svg += `<circle class="pt ${p.kind}" cx="${X(p.x)}" cy="40" r="5"/>`;
@@ -313,19 +315,22 @@ function cfsStep(c: Cycle, phase: 'sleep' | 'wake'): StepView {
     const v = num(sleep.d, 'vruntime');
     const min = num(sleep.d, 'min_vruntime');
     return {
-      plain:
+      plain: tr(
         `editor 睡著。CFS 什麼都不記：vruntime 停在原地，min_vruntime 繼續被兩個 compile 往前推。` +
-        `現在 editor 在 min_vruntime ${v < min ? '前面' : '後面'} ${ms(Math.abs(v - min), 2)}。`,
+          `現在 editor 在 min_vruntime ${v < min ? '前面' : '後面'} ${ms(Math.abs(v - min), 2)}。`,
+        `editor goes to sleep. CFS records nothing: its vruntime stays where it is while the two compile tasks keep pushing min_vruntime forward. ` +
+          `editor is now ${ms(Math.abs(v - min), 2)} ${v < min ? 'ahead of' : 'behind'} min_vruntime.`,
+      ),
       formula: String.raw`\Delta = v - \text{min\_vruntime}`,
-      symbols: 'v 是 editor 的 vruntime。Δ 為負表示排在前面、會先跑。',
+      symbols: tr('v 是 editor 的 vruntime。Δ 為負表示排在前面、會先跑。', 'v is the vruntime of editor. A negative Δ means it is further ahead and runs sooner.'),
       numbers: String.raw`\Delta = ${tsm(v - min)}`,
       line: numberLine('min_vruntime', [{ x: v - min, label: 'editor', kind: 'old' }]),
       code: codeBlock(snip('v2.6.24/dequeue_entity'), {
         context: 3,
         marks: {
-          update_curr: { note: `editor 的 vruntime 記到 ${ms(v)}` },
-          sleep_start: { note: '只有 schedstats', kind: 'skip' },
-          account: { note: '拿掉權重，vruntime 原封不動' },
+          update_curr: { note: tr(`editor 的 vruntime 記到 ${ms(v)}`, `editor's vruntime updated to ${ms(v)}`) },
+          sleep_start: { note: tr('只有 schedstats', 'schedstats only'), kind: 'skip' },
+          account: { note: tr('拿掉權重，vruntime 原封不動', 'weight removed, vruntime left untouched') },
         },
       }),
     };
@@ -339,24 +344,33 @@ function cfsStep(c: Cycle, phase: 'sleep' | 'wake'): StepView {
   const moved = min - num(sleep.d, 'min_vruntime');
   return {
     plain: kept
-      ? `editor 睡了 ${ms(slept, 1)}，這段時間 min_vruntime 只走了 ${ms(moved, 2)}。原本的位置比補償的位置還後面，補償沒用上，照原位放回去。`
-      : `editor 睡了 ${ms(slept, 1)}，這段時間 min_vruntime 走了 ${ms(moved, 2)}。照原位放回去，它會一口氣領回睡覺時沒用的時間，所以 CFS 把它拉到補償的上限：不管睡多久，都是 min_vruntime 前面 20ms。`,
+      ? tr(
+          `editor 睡了 ${ms(slept, 1)}，這段時間 min_vruntime 只走了 ${ms(moved, 2)}。原本的位置比補償的位置還後面，補償沒用上，照原位放回去。`,
+          `editor slept for ${ms(slept, 1)}, during which min_vruntime moved only ${ms(moved, 2)}. Its old position is further back than the bonus position, so the bonus is not used and it goes back where it was.`,
+        )
+      : tr(
+          `editor 睡了 ${ms(slept, 1)}，這段時間 min_vruntime 走了 ${ms(moved, 2)}。照原位放回去，它會一口氣領回睡覺時沒用的時間，所以 CFS 把它拉到補償的上限：不管睡多久，都是 min_vruntime 前面 20ms。`,
+          `editor slept for ${ms(slept, 1)}, during which min_vruntime moved ${ms(moved, 2)}. Put back where it was, it would claim back all the time it did not use while asleep in one go, so CFS pulls it up to the bonus limit: however long it slept, 20ms ahead of min_vruntime.`,
+        ),
     formula: String.raw`v' = \max\bigl(v,\ \text{min\_vruntime} - \text{sched\_latency}\bigr)`,
-    symbols: 'v 是睡前的 vruntime，v′ 是醒來放的位置，sched_latency 在 v2.6.24 單核是 20ms。下面兩邊都減掉 min_vruntime 來看。',
+    symbols: tr(
+      'v 是睡前的 vruntime，v′ 是醒來放的位置，sched_latency 在 v2.6.24 單核是 20ms。下面兩邊都減掉 min_vruntime 來看。',
+      'v is the vruntime before sleeping, v′ is where it is placed on waking, and sched_latency is 20ms on a single core in v2.6.24. Below, min_vruntime is subtracted from both sides.',
+    ),
     numbers: String.raw`v' - \text{min\_vruntime} = \max\bigl(${tsm(old - min)},\ ${tsm(-LATENCY, 0)}\bigr) = ${tsm(v - min)}`,
     line: numberLine('min_vruntime', [
-      { x: old - min, label: '原本', kind: 'old' },
-      { x: cand - min, label: '候選', kind: 'cand' },
-      { x: v - min, label: '放置', kind: 'new' },
+      { x: old - min, label: tr('原本', 'old'), kind: 'old' },
+      { x: cand - min, label: tr('候選', 'candidate'), kind: 'cand' },
+      { x: v - min, label: tr('放置', 'placed'), kind: 'new' },
     ]),
     code: codeBlock(snip('v2.6.24/place_entity'), {
       context: 2,
       marks: {
         base: { note: `= ${ms(min)}` },
-        debit_if: { note: '喚醒時 initial = 0，不走', kind: 'skip' },
+        debit_if: { note: tr('喚醒時 initial = 0，不走', 'initial = 0 on wakeup, not taken'), kind: 'skip' },
         wake_if: { note: '' },
         sleeper: { note: `− ${ms(LATENCY, 0)} → ${ms(cand)}` },
-        clamp: { note: `max(${ms(old)}, ${ms(cand)}) → ${kept ? '原本' : '候選'}`, kind: 'key' },
+        clamp: { note: `max(${ms(old)}, ${ms(cand)}) → ${kept ? tr('原本', 'old') : tr('候選', 'candidate')}`, kind: 'key' },
         assign: { note: `= ${ms(v)}` },
       },
     }),
@@ -374,10 +388,15 @@ function eevdfStep(c: Cycle, phase: 'sleep' | 'wake'): StepView {
     const clipped = lag !== vlag;
     return {
       plain:
-        `editor 睡著前，EEVDF 把它和 V 的距離存成 vlag：正的表示還被欠，負的表示多拿了。之後只看 vlag，不看 vruntime 本身。` +
-        (clipped ? '這次超過上限，被截掉一段。' : ''),
+        tr(
+          `editor 睡著前，EEVDF 把它和 V 的距離存成 vlag：正的表示還被欠，負的表示多拿了。之後只看 vlag，不看 vruntime 本身。`,
+          `Before editor goes to sleep, EEVDF saves its distance from V as vlag: positive means it is still owed, negative means it has taken extra. From here on only vlag matters, not the vruntime itself.`,
+        ) + (clipped ? tr('這次超過上限，被截掉一段。', ' This time it exceeds the limit and is cut off.') : ''),
       formula: String.raw`\text{vlag} = \operatorname{clamp}\bigl(V - v,\ \pm\,\text{limit}\bigr)`,
-      symbols: 'V 是佇列上 vruntime 的加權平均，v 是 editor 的 vruntime，limit 是 2 個 slice 和 1 個 tick 取大的、換成虛擬時間。',
+      symbols: tr(
+        'V 是佇列上 vruntime 的加權平均，v 是 editor 的 vruntime，limit 是 2 個 slice 和 1 個 tick 取大的、換成虛擬時間。',
+        'V is the weighted average of the vruntimes on the queue, v is the vruntime of editor, and limit is the larger of 2 slices and 1 tick, converted to virtual time.',
+      ),
       numbers: String.raw`\text{vlag} = \operatorname{clamp}\bigl(${tsm(lag)},\ \pm\,${tm(limit, 1)}\bigr) = ${tsm(vlag)}`,
       line: numberLine('V', [{ x: v - V, label: 'editor', kind: 'old' }]),
       code: codeBlock(snip('v6.6/update_entity_lag'), {
@@ -397,16 +416,22 @@ function eevdfStep(c: Cycle, phase: 'sleep' | 'wake'): StepView {
   const v = num(wake.d, 'vruntime');
   const dl = num(wake.d, 'deadline');
   return {
-    plain:
+    plain: tr(
       `editor 睡了 ${ms(wake.t - sleep.t, 1)} 醒來，放回 V − vlag 的位置（vlag 先放大一點，因為它一加入，V 就會往它那邊移）。` +
-      `睡多久不影響結果，同樣的 vlag 睡 4.7ms 或 97.3ms 都放在同一個相對位置。`,
+        `睡多久不影響結果，同樣的 vlag 睡 4.7ms 或 97.3ms 都放在同一個相對位置。`,
+      `editor wakes after sleeping ${ms(wake.t - sleep.t, 1)} and is put back at V − vlag (vlag is scaled up a little first, because as soon as it joins, V moves towards it). ` +
+        `How long it slept makes no difference: with the same vlag, sleeping 4.7ms or 97.3ms gives the same relative position.`,
+    ),
     formula: String.raw`\begin{aligned} \text{lag} &= \text{vlag}\cdot\dfrac{W + w}{W} \\ v &= V - \text{lag} \\ d &= v + \dfrac{\text{slice}\cdot 1024}{w} \end{aligned}`,
-    symbols: 'W 是佇列上其他程式的權重總和，w 是 editor 的權重，d 是 deadline，slice 在 v6.6 是 0.75ms。',
+    symbols: tr(
+      'W 是佇列上其他程式的權重總和，w 是 editor 的權重，d 是 deadline，slice 在 v6.6 是 0.75ms。',
+      'W is the total weight of the other tasks on the queue, w is the weight of editor, d is the deadline, and the slice is 0.75ms in v6.6.',
+    ),
     numbers:
       String.raw`\begin{aligned} \text{lag} &= ${tsm(vlag)}\cdot\dfrac{${W} + ${w}}{${W}} = ${tsm(lag)} \\ ` +
       String.raw`v - V &= ${tsm(v - V)} \\ d - V &= ${tsm(dl - V)} \end{aligned}`,
     line: numberLine('V', [
-      { x: v - V, label: '放置', kind: 'new' },
+      { x: v - V, label: tr('放置', 'placed'), kind: 'new' },
       { x: dl - V, label: 'deadline', kind: 'dl' },
     ]),
     code: codeBlock(snip('v6.6/place_entity'), {
@@ -419,7 +444,7 @@ function eevdfStep(c: Cycle, phase: 'sleep' | 'wake'): StepView {
         inflate: { note: `× (${W} + ${w})` },
         div: { note: `÷ ${W} → ${sms(lag)}`, kind: 'key' },
         assign: { note: `= ${ms(v)}` },
-        initial: { note: '喚醒不是 ENQUEUE_INITIAL，不走', kind: 'skip' },
+        initial: { note: tr('喚醒不是 ENQUEUE_INITIAL，不走', 'a wakeup is not ENQUEUE_INITIAL, not taken'), kind: 'skip' },
         deadline: { note: `= ${ms(dl)}` },
       },
     }),
@@ -435,13 +460,19 @@ function stepper(root: HTMLElement): void {
   let step = 0;
 
   const card = h('article', 'card explain');
-  card.innerHTML = `
+  card.innerHTML = tr(
+    `
     <h2>逐步執行：editor 睡著、醒來</h2>
     <p>兩個 compile 一直佔著 CPU。editor 在 30.3ms 出現，每次跑 1.3ms 就去睡，先睡兩次 4.7ms，再睡一次 97.3ms，然後重複。短睡和長睡交錯，是為了讓 CFS 兩種結果都出現：一種是保留原本的 vruntime，一種是被拉到補償的位置。所有時間都刻意不對齊 1ms 的 tick。</p>
-    <p class="desc">每一步左右各顯示一個 kernel 函式。底色標出這一步執行到的行，行下的註記是模擬器算出的實際數值；橘色是決定結果的那一行，灰色斜體是這一步沒有走到的分支。數線以 CFS 的 min_vruntime、EEVDF 的 V 為 0，越左邊越早被選到。</p>`;
+    <p class="desc">每一步左右各顯示一個 kernel 函式。底色標出這一步執行到的行，行下的註記是模擬器算出的實際數值；橘色是決定結果的那一行，灰色斜體是這一步沒有走到的分支。數線以 CFS 的 min_vruntime、EEVDF 的 V 為 0，越左邊越早被選到。</p>`,
+    `
+    <h2>Step by step: editor sleeps and wakes</h2>
+    <p>Two compile tasks keep the CPU busy. editor appears at 30.3ms and goes to sleep after each 1.3ms run: first two sleeps of 4.7ms, then one of 97.3ms, and repeat. Short and long sleeps alternate so that both outcomes of CFS show up: keeping the old vruntime, and being pulled up to the bonus position. All times are deliberately not aligned to the 1ms tick.</p>
+    <p class="desc">Each step shows one kernel function on each side. The shaded lines are the ones this step executes, and the note under a line is the actual value the simulator computed; orange is the line that decides the result, grey italics a branch this step does not take. The number line puts CFS's min_vruntime and EEVDF's V at 0; the further left, the sooner a task is picked.</p>`,
+  );
   const bar = h('div', 'stepbar');
-  const prev = h('button', '', '◀ 上一步');
-  const next = h('button', '', '下一步 ▶');
+  const prev = h('button', '', tr('◀ 上一步', '◀ Back'));
+  const next = h('button', '', tr('下一步 ▶', 'Next ▶'));
   prev.type = next.type = 'button';
   const label = h('span', 'steplabel');
   bar.append(prev, label, next);
@@ -455,36 +486,46 @@ function stepper(root: HTMLElement): void {
 
   // 摘要表：每次喚醒的結果
   const table = h('table', 'wake-table');
-  table.innerHTML =
+  table.innerHTML = tr(
     '<thead><tr><th>#</th><th>睡了</th><th>CFS 睡前<br>v − min_vruntime</th><th>CFS 醒來<br>v − min_vruntime</th><th>CFS 補償</th>' +
-    '<th>EEVDF 睡前<br>vlag</th><th>EEVDF 醒來<br>v − V</th></tr></thead>';
+      '<th>EEVDF 睡前<br>vlag</th><th>EEVDF 醒來<br>v − V</th></tr></thead>',
+    '<thead><tr><th>#</th><th>slept</th><th>CFS before sleep<br>v − min_vruntime</th><th>CFS on waking<br>v − min_vruntime</th><th>CFS bonus</th>' +
+      '<th>EEVDF before sleep<br>vlag</th><th>EEVDF on waking<br>v − V</th></tr></thead>',
+  );
   const tb = h('tbody');
   for (let k = 0; k < n; k++) {
     const c = cfs[k]!;
     const e = eevdf[k]!;
-    const tr = h('tr');
+    const row = h('tr');
     const cBefore = num(c.sleep.d, 'vruntime') - num(c.sleep.d, 'min_vruntime');
     const cAfter = num(c.wake.d, 'vruntime') - num(c.wake.d, 'min_vruntime');
-    tr.innerHTML =
+    row.innerHTML =
       `<td>${k + 1}</td><td>${ms(c.wake.t - c.sleep.t, 1)}</td><td>${sms(cBefore)}</td><td>${sms(cAfter)}</td>` +
-      `<td>${c.wake.d.kept_old ? '沒用上' : '拉到 −20ms'}</td>` +
+      `<td>${c.wake.d.kept_old ? tr('沒用上', 'not used') : tr('拉到 −20ms', 'pulled to −20ms')}</td>` +
       `<td>${sms(num(e.sleep.d, 'vlag'))}</td><td>${sms(num(e.wake.d, 'vruntime') - num(e.wake.d, 'V'))}</td>`;
-    tr.addEventListener('click', () => go(2 * k + 1));
-    tb.append(tr);
+    row.addEventListener('click', () => go(2 * k + 1));
+    tb.append(row);
   }
   table.append(tb);
   const sum = h('div', 'wake-summary');
   sum.append(
-    h('h3', '', '每次喚醒的結果（點一列跳到那一步）'),
+    h('h3', '', tr('每次喚醒的結果（點一列跳到那一步）', 'Result of each wakeup (click a row to jump to that step)')),
     table,
     h(
       'p',
       '',
-      'CFS 那兩欄看得出補償只和「睡多久、這段時間 min_vruntime 走多遠」有關：短睡醒來和睡前差不多，長睡一律變成 −20ms，不管睡前是落後還是超前。' +
-        '第一次長睡之後，editor 每次只跑 1.3ms，追不回這 20ms，之後連短睡醒來也被 max_vruntime() 拉回 −20ms，等於一直貼著補償的上限，' +
-        '每次醒來都排在兩個 compile 前面。這就是模擬頁裡 CFS 的 editor lag 一路往下的原因。' +
-        'EEVDF 醒來的位置只由睡前的 vlag 決定，乘上 1.5 倍（兩個 compile 加上自己，(2048 + 1024) / 2048）再反號。' +
-        '睡前多拿了（vlag 為負），醒來就排在 V 後面，要先還；睡多久都一樣。',
+      tr(
+        'CFS 那兩欄看得出補償只和「睡多久、這段時間 min_vruntime 走多遠」有關：短睡醒來和睡前差不多，長睡一律變成 −20ms，不管睡前是落後還是超前。' +
+          '第一次長睡之後，editor 每次只跑 1.3ms，追不回這 20ms，之後連短睡醒來也被 max_vruntime() 拉回 −20ms，等於一直貼著補償的上限，' +
+          '每次醒來都排在兩個 compile 前面。這就是模擬頁裡 CFS 的 editor lag 一路往下的原因。' +
+          'EEVDF 醒來的位置只由睡前的 vlag 決定，乘上 1.5 倍（兩個 compile 加上自己，(2048 + 1024) / 2048）再反號。' +
+          '睡前多拿了（vlag 為負），醒來就排在 V 後面，要先還；睡多久都一樣。',
+        'The two CFS columns show that the bonus depends only on "how long it slept and how far min_vruntime moved in that time": after a short sleep the position is about the same as before, and after a long sleep it is always −20ms, whether it was behind or ahead before sleeping. ' +
+          'After the first long sleep, editor runs only 1.3ms at a time and never makes up those 20ms, so from then on even short sleeps end with max_vruntime() pulling it back to −20ms. It stays pinned at the bonus limit, ' +
+          'and every time it wakes it is placed ahead of the two compile tasks. That is why the lag of editor under CFS keeps going down on the Simulate page. ' +
+          'Under EEVDF the position on waking is decided only by the vlag from before the sleep, multiplied by 1.5 (the two compile tasks plus itself, (2048 + 1024) / 2048) with the sign flipped. ' +
+          'If it took extra before sleeping (negative vlag), it is placed behind V on waking and has to pay that back first, however long it slept.',
+      ),
     ),
   );
   card.append(sum);
@@ -493,7 +534,10 @@ function stepper(root: HTMLElement): void {
   function render(): void {
     const k = Math.floor(step / 2);
     const phase = step % 2 ? 'wake' : 'sleep';
-    label.textContent = `第 ${step + 1} / ${total} 步：第 ${k + 1} 次${phase === 'sleep' ? '睡著' : '醒來'}`;
+    label.textContent = tr(
+      `第 ${step + 1} / ${total} 步：第 ${k + 1} 次${phase === 'sleep' ? '睡著' : '醒來'}`,
+      `Step ${step + 1} / ${total}: ${phase === 'sleep' ? 'sleep' : 'wakeup'} ${k + 1}`,
+    );
     prev.disabled = step === 0;
     next.disabled = step === total - 1;
     for (const [col, title, view] of [
@@ -509,7 +553,7 @@ function stepper(root: HTMLElement): void {
       const lines = col.querySelector<HTMLElement>('.lines');
       if (lines) lines.scrollTop = scroll;
     }
-    for (const [i, tr] of [...tb.children].entries()) tr.classList.toggle('current', i === k);
+    for (const [i, row] of [...tb.children].entries()) row.classList.toggle('current', i === k);
   }
   function go(s: number): void {
     step = Math.max(0, Math.min(total - 1, s));
@@ -532,19 +576,25 @@ function stepper(root: HTMLElement): void {
 
 function v65Card(root: HTMLElement): void {
   const card = h('article', 'card explain');
-  card.innerHTML = `
+  card.innerHTML = tr(
+    `
     <h2>中間的版本：v6.5 的補償</h2>
     <p>v2.6.24 之後補償改過幾次。下面是 EEVDF 合併前最後一版 CFS（v6.5）的 <code>place_entity()</code>，模擬器沒有實作，只對照程式碼。最大的不同是補償變小了：<code>GENTLE_FAIR_SLEEPERS</code>（v2.6.32 起，預設開）把它減半，sched_latency 本身也縮短，單核只補 3ms，v2.6.24 是 20ms。</p>
-    <p>基準點還是 min_vruntime，也還是用 <code>max_vruntime()</code> 防止倒退。所以 v2.6.24 的問題 v6.5 一樣有：補償和睡前的公平狀態無關，只是一段固定的時間。</p>`;
+    <p>基準點還是 min_vruntime，也還是用 <code>max_vruntime()</code> 防止倒退。所以 v2.6.24 的問題 v6.5 一樣有：補償和睡前的公平狀態無關，只是一段固定的時間。</p>`,
+    `
+    <h2>In between: the bonus in v6.5</h2>
+    <p>The bonus changed several times after v2.6.24. Below is <code>place_entity()</code> from v6.5, the last CFS release before EEVDF was merged; the simulator does not implement it, so it is shown as code only. The biggest difference is that the bonus got smaller: <code>GENTLE_FAIR_SLEEPERS</code> (since v2.6.32, on by default) halves it, and sched_latency itself is shorter, so on a single core the bonus is only 3ms, against 20ms in v2.6.24.</p>
+    <p>The reference point is still min_vruntime, and <code>max_vruntime()</code> still prevents going backwards. So v6.5 has the same problem as v2.6.24: the bonus has nothing to do with how fairly the task was treated before sleeping; it is just a fixed amount of time.</p>`,
+  );
   card.append(
     codeBlock(snip('v6.5/place_entity'), {
       context: 2,
       marks: {
-        base: { note: '基準還是 min_vruntime' },
-        thresh: { note: '單核 6ms' },
-        gentle: { note: '減半 → 3ms', kind: 'key' },
+        base: { note: tr('基準還是 min_vruntime', 'still relative to min_vruntime') },
+        thresh: { note: tr('單核 6ms', '6ms on a single core') },
+        gentle: { note: tr('減半 → 3ms', 'halved → 3ms'), kind: 'key' },
         sleeper: { note: '' },
-        clamp: { note: '和 v2.6.24 一樣取大的' },
+        clamp: { note: tr('和 v2.6.24 一樣取大的', 'takes the larger, as in v2.6.24') },
       },
     }),
   );
@@ -553,20 +603,26 @@ function v65Card(root: HTMLElement): void {
 
 function migrationCard(root: HTMLElement): void {
   const card = h('article', 'card explain');
-  card.innerHTML = `
+  card.innerHTML = tr(
+    `
     <h2>多核：搬到別的 CPU 時</h2>
     <p class="desc">模擬器是單核，沒有 migration，這一段只對照程式碼。</p>
-    <p>每顆 CPU 的 min_vruntime 各走各的。CFS 的 vruntime 是絕對值，搬家前要先減掉舊 CPU 的 min_vruntime，到了新 CPU 再加回新的，否則可能排到最後面，或一直霸佔 CPU。EEVDF 存的 vlag 本來就是相對 V 的量，在哪顆 CPU 放回去都一樣，這段正規化就整個不需要了。</p>`;
+    <p>每顆 CPU 的 min_vruntime 各走各的。CFS 的 vruntime 是絕對值，搬家前要先減掉舊 CPU 的 min_vruntime，到了新 CPU 再加回新的，否則可能排到最後面，或一直霸佔 CPU。EEVDF 存的 vlag 本來就是相對 V 的量，在哪顆 CPU 放回去都一樣，這段正規化就整個不需要了。</p>`,
+    `
+    <h2>Multiple cores: moving to another CPU</h2>
+    <p class="desc">The simulator is single-core and has no migration, so this part is shown as code only.</p>
+    <p>Each CPU's min_vruntime moves on its own. A CFS vruntime is an absolute value, so before moving, the old CPU's min_vruntime has to be subtracted and the new CPU's added back on arrival; otherwise the task may end up at the very back, or hog the CPU. The vlag EEVDF saves is already relative to V, so it can be put back the same way on any CPU, and this whole normalization is no longer needed.</p>`,
+  );
   const grid = h('div', 'srccols');
   grid.append(
     codeBlock(snip('v6.5/migrate_task_rq_fair'), {
       context: 3,
       marks: {
-        waking: { note: '睡著的程式被遠端喚醒' },
-        normalize: { note: '減掉舊 CPU 的 min_vruntime', kind: 'key' },
+        waking: { note: tr('睡著的程式被遠端喚醒', 'a sleeping task woken remotely') },
+        normalize: { note: tr('減掉舊 CPU 的 min_vruntime', "subtract the old CPU's min_vruntime"), kind: 'key' },
       },
     }),
-    codeBlock(snip('v6.6/migrate_task_rq_fair'), { marks: {}, caption: '已經沒有 vruntime 的處理' }),
+    codeBlock(snip('v6.6/migrate_task_rq_fair'), { marks: {}, caption: tr('已經沒有 vruntime 的處理', 'no vruntime handling any more') }),
   );
   card.append(grid);
   root.append(card);
@@ -580,10 +636,16 @@ export function mountSourcePage(root: HTMLElement): void {
   mounted = true;
   root.replaceChildren();
   const intro = h('article', 'card explain');
-  intro.innerHTML = `
+  intro.innerHTML = tr(
+    `
     <h2>睡醒的程式放在哪裡</h2>
     <p>程式睡醒回到 runqueue 時，排程器要決定它的 vruntime 從哪裡算起。這個決定同時影響延遲和公平：放得前面，它醒來就能先跑，但用的是別人的時間；放得後面，編輯器按一個鍵要等前面的人跑完。CFS 用「睡過就補一段」來處理，EEVDF 改成「記住睡前的 lag，醒來放回去」。這一頁用同一個情境把兩邊的程式碼逐步對起來，再看中間的 v6.5 和 migration 那段，最後會發現 EEVDF 拿掉補償之後，多核 migration 時的正規化也一起不需要了。</p>
-    <p class="desc">程式碼片段由 <code>scripts/extract-snippets.ts</code> 從 <code>kernel-src/</code> 抽出，行號是原檔的行號，標題列連到 Elixir。lag 的定義與 GPS 的推導在學習路線<a href="#/learn/lag">第 3 章</a>。</p>`;
+    <p class="desc">程式碼片段直接從各版本的 kernel 原始碼抽出，行號是原檔的行號，標題列連到 Elixir。lag 的定義與 GPS 的推導在學習路線<a href="#/learn/lag">第 3 章</a>。</p>`,
+    `
+    <h2>Where a waking task is placed</h2>
+    <p>When a task wakes up and returns to the runqueue, the CPU scheduler has to decide where its vruntime starts from. This decision affects both latency and fairness: place it near the front and it runs soon after waking, but on other tasks' time; place it near the back and a key press in the editor waits for everyone ahead to run. CFS handles this with "if you slept, you get a bonus"; EEVDF switches to "remember the lag from before the sleep and put it back on waking". This page steps through the code of both side by side on the same scenario, then looks at v6.5 in between and at migration, and ends by showing that once EEVDF dropped the bonus, the normalization during multi-core migration became unnecessary too.</p>
+    <p class="desc">The code snippets are extracted directly from the kernel source of each version; line numbers are those of the original files, and each title bar links to Elixir. The definition of lag and the derivation from GPS are in <a href="#/learn/lag">Chapter 3</a> of the learning path.</p>`,
+  );
   root.append(intro);
   stepper(root);
   v65Card(root);
