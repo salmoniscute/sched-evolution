@@ -1,5 +1,6 @@
 // 學習路線 O(1) 兩章的互動小圖：prio_array 的兩輪（active / expired），以及 sleep_avg 怎麼被睡眠推高。
 // 玩具模型，不經過模擬核心；常數照 2.6.0 kernel/sched.c（HZ = 1000，nice 0），簡化之處寫在圖下方。
+import { gap, tr } from '../i18n.ts';
 import { tex } from './math.ts';
 
 const SLICE = 102; // BASE_TIMESLICE(nice 0)，ms
@@ -40,7 +41,10 @@ function arraysWidget(box: HTMLElement): void {
     queue = { active: { 118: [], 125: [0, 1, 2] }, expired: { 118: [], 125: [] } };
     now = 0;
     expiredTs = 0;
-    last = '三個 task 都是一直有事做的 CPU-bound task，nice 0，時間片各 102ms。按「跑一個時間片」開始。';
+    last = tr(
+      '三個 task 都是一直有事做的 CPU-bound task，nice 0，時間片各 102ms。按「跑一個時間片」開始。',
+      'All three are CPU-bound tasks that always have work to do, nice 0, with a 102ms time slice each. Press "Run one time slice" to start.',
+    );
   };
   reset();
 
@@ -67,7 +71,7 @@ function arraysWidget(box: HTMLElement): void {
       [queue.active, queue.expired] = [queue.expired, queue.active];
       for (const t of tasks) t.arr = t.arr === 'active' ? 'expired' : 'active';
       expiredTs = 0;
-      notes.push('這一輪空了，兩個 prio_array 的指標對調，下一輪變成這一輪。');
+      notes.push(tr('這一輪空了，兩個 prio_array 的指標對調，下一輪變成這一輪。', 'This round is empty, so the two prio_array pointers are swapped and the next round becomes this round. '));
     }
     const p = firstBit('active')!;
     const i = queue.active[p]!.shift()!;
@@ -82,22 +86,33 @@ function arraysWidget(box: HTMLElement): void {
       queue.expired[t.prio]!.push(i);
       notes.push(
         inter
-          ? `${t.name} 是 interactive，但從第一個 task 用完時間片算起已經過了 ${now - expiredTs}ms，超過 ${limit}ms（STARVATION_LIMIT × 3 個 task），EXPIRED_STARVING 成立，這次它也得去下一輪。`
-          : `${t.name} 跑完 102ms 的時間片，拿到新的時間片後排到下一輪。`,
+          ? tr(
+              `${t.name} 是 interactive，但從第一個 task 用完時間片算起已經過了 ${now - expiredTs}ms，超過 ${limit}ms（STARVATION_LIMIT × 3 個 task），EXPIRED_STARVING 成立，這次它也得去下一輪。`,
+              `${t.name} is interactive, but ${now - expiredTs}ms have passed since the first task used up its time slice, more than ${limit}ms (STARVATION_LIMIT × 3 tasks). EXPIRED_STARVING holds, so this time it has to go to the next round too.`,
+            )
+          : tr(
+              `${t.name} 跑完 102ms 的時間片，拿到新的時間片後排到下一輪。`,
+              `${t.name} finished its 102ms time slice, got a new one and was put into the next round.`,
+            ),
       );
     } else {
       queue.active[t.prio]!.push(i);
-      notes.push(`${t.name} 被判定為 interactive（TASK_INTERACTIVE），跑完時間片後排回這一輪的隊尾，不用等下一輪。`);
+      notes.push(
+        tr(
+          `${t.name} 被判定為 interactive（TASK_INTERACTIVE），跑完時間片後排回這一輪的隊尾，不用等下一輪。`,
+          `${t.name} counts as interactive (TASK_INTERACTIVE), so after its time slice it goes back to the tail of this round instead of waiting for the next.`,
+        ),
+      );
     }
-    return `選了 prio ${p} 的 ${t.name}。` + notes.join('');
+    return tr(`選了 prio ${p} 的 ${t.name}。`, `Picked ${t.name} at prio ${p}. `) + notes.join('');
   };
 
   box.innerHTML = `<div class="w-btns">
-      <button type="button" data-a="1">跑一個時間片</button>
-      <button type="button" data-a="10">跑 10 個</button>
-      <button type="button" data-a="30">跑 30 個</button>
+      <button type="button" data-a="1">${tr('跑一個時間片', 'Run one time slice')}</button>
+      <button type="button" data-a="10">${tr('跑 10 個', 'Run 10')}</button>
+      <button type="button" data-a="30">${tr('跑 30 個', 'Run 30')}</button>
       <button type="button" data-a="inter"></button>
-      <button type="button" data-a="reset" class="quiet">重來</button>
+      <button type="button" data-a="reset" class="quiet">${tr('重來', 'Reset')}</button>
     </div>
     <div class="w-svg"></div>
     <p class="w-out"></p>
@@ -114,18 +129,21 @@ function arraysWidget(box: HTMLElement): void {
     else if (a === 'inter') {
       setInteractive(!cInteractive);
       last = cInteractive
-        ? 'C 的 sleep_avg 夠高，bonus +2，prio 從 120 變成 118，被判定為 interactive。它在 prio 118 那一格，比 A、B 的 125 優先。（C 為什麼會有這麼高的 sleep_avg，是下一章的主題，這裡先直接給它。）'
-        : 'C 回到 bonus −5、prio 125，和 A、B 一樣。';
+        ? tr(
+            'C 的 sleep_avg 夠高，bonus +2，prio 從 120 變成 118，被判定為 interactive。它在 prio 118 那一格，比 A、B 的 125 優先。（C 為什麼會有這麼高的 sleep_avg，是下一章的主題，這裡先直接給它。）',
+            'C\'s sleep_avg is high enough for a bonus of +2, so its prio goes from 120 to 118 and it counts as interactive. It sits at prio 118, ahead of A and B at 125. (Why C would have such a high sleep_avg is the topic of the next chapter; here it is simply given.)',
+          )
+        : tr('C 回到 bonus −5、prio 125，和 A、B 一樣。', 'C is back at bonus −5 and prio 125, the same as A and B.');
     } else {
       const n = Number(a);
       const msgs = Array.from({ length: n }, step);
-      last = n === 1 ? msgs[0]! : `跑了 ${n} 個時間片（${n * SLICE}ms）。最後一次：${msgs[n - 1]}`;
+      last = n === 1 ? msgs[0]! : tr(`跑了 ${n} 個時間片（${n * SLICE}ms）。最後一次：${msgs[n - 1]}`, `Ran ${n} time slices (${n * SLICE}ms). The last one: ${msgs[n - 1]}`);
     }
     render();
   });
 
   const render = () => {
-    interBtn.textContent = cInteractive ? '讓 C 回到普通的 task' : '讓 C 被判定為 interactive';
+    interBtn.textContent = cInteractive ? tr('讓 C 回到普通的 task', 'Make C a normal task again') : tr('讓 C 被判定為 interactive', 'Make C interactive');
     const next = nrActive('active') ? ['active', firstBit('active')] : ['expired', firstBit('expired')];
     const nextIdx = next[1] !== undefined ? queue[next[0] as Arr][next[1] as number]![0] : undefined;
     const panel = (a: Arr, x0: number, title: string) => {
@@ -149,15 +167,18 @@ function arraysWidget(box: HTMLElement): void {
         <text class="dg-t" x="${x0 + 12}" y="24">${title}</text>
         <text class="dg-s" x="${x0 + 74}" y="38">bitmap</text>${rows}`;
     };
-    svgBox.innerHTML = `<svg viewBox="0 0 640 148" role="img" aria-label="O(1) 的兩個 prio_array">
-      ${panel('active', 6, '這一輪（active）')}${panel('expired', 334, '下一輪（expired）')}
+    svgBox.innerHTML = `<svg viewBox="0 0 640 148" role="img" aria-label="${tr('O(1) 的兩個 prio_array', 'The two prio_arrays of O(1)')}">
+      ${panel('active', 6, tr('這一輪（active）', 'This round (active)'))}${panel('expired', 334, tr('下一輪（expired）', 'Next round (expired)'))}
     </svg>`;
     out.textContent = last;
     const total = tasks.reduce((s, t) => s + t.ran, 0);
     // expired_timestamp 在第一個 task 用完時間片時開始計時（即使它被排回這一輪），對調時歸零
-    const wait = expiredTs ? `　EXPIRED_STARVING 的計時：${now - expiredTs} / ${limit}ms` : '';
+    const wait = expiredTs ? gap + tr(`EXPIRED_STARVING 的計時：${now - expiredTs} / ${limit}ms`, `EXPIRED_STARVING timer: ${now - expiredTs} / ${limit}ms`) : '';
+    const pct = (t: Toy) => ((t.ran / total) * 100).toFixed(0);
     tally.textContent = total
-      ? `經過 ${now}ms，累計執行：${tasks.map((t) => `${t.name} ${t.ran}ms（${((t.ran / total) * 100).toFixed(0)}%）`).join('　')}${wait}`
+      ? tr(`經過 ${now}ms，累計執行：`, `After ${now}ms, total run time: `) +
+        tasks.map((t) => `${t.name} ${t.ran}ms${tr(`（${pct(t)}%）`, ` (${pct(t)}%)`)}`).join(gap) +
+        wait
       : '';
   };
   render();
@@ -167,9 +188,9 @@ function arraysWidget(box: HTMLElement): void {
 // sleep_avg：跑 r、睡 s，重複 3 秒
 
 const PRESETS = [
-  { label: '編輯器：跑 1.3、睡 8.7', r: 1.3, s: 8.7 },
-  { label: 'cheat：跑 2.3、睡 0.83', r: 2.3, s: 0.83 },
-  { label: '跑 3、睡 0.8', r: 3, s: 0.8 },
+  { label: tr('編輯器：跑 1.3、睡 8.7', 'editor: run 1.3, sleep 8.7'), r: 1.3, s: 8.7 },
+  { label: tr('cheat：跑 2.3、睡 0.83', 'cheat: run 2.3, sleep 0.83'), r: 2.3, s: 0.83 },
+  { label: tr('跑 3、睡 0.8', 'run 3, sleep 0.8'), r: 3, s: 0.8 },
 ];
 const DURATION = 3000;
 
@@ -179,8 +200,8 @@ function sleepAvgWidget(box: HTMLElement): void {
 
   box.innerHTML = `<div class="w-btns">${PRESETS.map((p, i) => `<button type="button" data-p="${i}">${p.label}</button>`).join('')}</div>
     <div class="w-sliders">
-      <label class="w-slice s1">每次跑 <input type="range" min="0.1" max="10" step="0.01" data-k="r" aria-label="每次跑多久"><output></output></label>
-      <label class="w-slice s2">每次睡 <input type="range" min="0.1" max="10" step="0.01" data-k="s" aria-label="每次睡多久"><output></output></label>
+      <label class="w-slice s1">${tr('每次跑', 'run each time')} <input type="range" min="0.1" max="10" step="0.01" data-k="r" aria-label="${tr('每次跑多久', 'how long each run lasts')}"><output></output></label>
+      <label class="w-slice s2">${tr('每次睡', 'sleep each time')} <input type="range" min="0.1" max="10" step="0.01" data-k="s" aria-label="${tr('每次睡多久', 'how long each sleep lasts')}"><output></output></label>
     </div>
     <div class="w-svg"></div>
     <div class="w-eq"></div>
@@ -255,11 +276,11 @@ function sleepAvgWidget(box: HTMLElement): void {
       })
       .join('');
     const ticks = [0, 1000, 2000, 3000]
-      .map((t) => `<text class="dg-s" x="${x(t)}" y="${Y0 + 16}" text-anchor="middle">${t / 1000} 秒</text>`)
+      .map((t) => `<text class="dg-s" x="${x(t)}" y="${Y0 + 16}" text-anchor="middle">${t / 1000}${tr(' 秒', 's')}</text>`)
       .join('');
-    svgBox.innerHTML = `<svg viewBox="0 0 640 228" role="img" aria-label="sleep_avg 隨時間的變化">
+    svgBox.innerHTML = `<svg viewBox="0 0 640 228" role="img" aria-label="${tr('sleep_avg 隨時間的變化', 'sleep_avg over time')}">
       <rect class="dg-elig" x="${X0}" y="${y(MAX_SLEEP_AVG)}" width="${X1 - X0}" height="${y(th) - y(MAX_SLEEP_AVG)}"/>
-      <text class="dg-s" x="${X0 + 6}" y="${y(MAX_SLEEP_AVG) + 13}">interactive（nice 0：bonus ≥ +2）</text>
+      <text class="dg-s" x="${X0 + 6}" y="${y(MAX_SLEEP_AVG) + 13}">${tr('interactive（nice 0：bonus ≥ +2）', 'interactive (nice 0: bonus ≥ +2)')}</text>
       ${bands}
       <text class="dg-s" x="${X0 - 40}" y="${Y1 - 10}" text-anchor="start">sleep_avg</text>
       <text class="dg-s" x="${X1 + 6}" y="${Y1 - 10}">bonus</text>
@@ -276,13 +297,20 @@ function sleepAvgWidget(box: HTMLElement): void {
     // 最後一秒的範圍：hi 是剛睡醒時（recalc_task_prio() 之後），lo 是跑完時
     const verdict =
       lo >= 7
-        ? `剛睡醒時 CURRENT_BONUS ${hi}（bonus ${fmt(hi - 5)}），跑完時 ${lo}（bonus ${fmt(lo - 5)}），一直都在 interactive 的區域：醒來能打斷 bonus 比它低的 task，時間片用完還能留在這一輪。`
+        ? tr(
+            `剛睡醒時 CURRENT_BONUS ${hi}（bonus ${fmt(hi - 5)}），跑完時 ${lo}（bonus ${fmt(lo - 5)}），一直都在 interactive 的區域：醒來能打斷 bonus 比它低的 task，時間片用完還能留在這一輪。`,
+            `CURRENT_BONUS is ${hi} (bonus ${fmt(hi - 5)}) right after waking and ${lo} (bonus ${fmt(lo - 5)}) after running, so it stays in the interactive zone throughout: on waking it can interrupt tasks with a lower bonus, and when its time slice runs out it can stay in this round.`,
+          )
         : hi >= 7
-          ? `剛睡醒時 CURRENT_BONUS ${hi}（bonus ${fmt(hi - 5)}），算 interactive，醒來能打斷一直在跑的 task；跑著跑著掉到 ${lo}（bonus ${fmt(lo - 5)}），時間片多半在這時用完，得去下一輪。`
-          : `CURRENT_BONUS 最高只到 ${hi}（bonus ${fmt(hi - 5)}），不算 interactive。`;
+          ? tr(
+              `剛睡醒時 CURRENT_BONUS ${hi}（bonus ${fmt(hi - 5)}），算 interactive，醒來能打斷一直在跑的 task；跑著跑著掉到 ${lo}（bonus ${fmt(lo - 5)}），時間片多半在這時用完，得去下一輪。`,
+              `CURRENT_BONUS is ${hi} (bonus ${fmt(hi - 5)}) right after waking, which counts as interactive, so on waking it can interrupt a task that runs all the time. While running it drops to ${lo} (bonus ${fmt(lo - 5)}), and since the time slice usually runs out then, it has to go to the next round.`,
+            )
+          : tr(`CURRENT_BONUS 最高只到 ${hi}（bonus ${fmt(hi - 5)}），不算 interactive。`, `CURRENT_BONUS reaches only ${hi} (bonus ${fmt(hi - 5)}) at most, which does not count as interactive.`);
     out.textContent =
-      `這個 task 有 ${(use * 100).toFixed(1)}% 的時間在用 CPU。${verdict}` +
-      (lo >= 7 && use >= 0.5 ? '它用 CPU 的時間比睡覺多，卻被當成需要快速回應的程式。' : '');
+      tr(`這個 task 有 ${(use * 100).toFixed(1)}% 的時間在用 CPU。`, `This task uses the CPU ${(use * 100).toFixed(1)}% of the time. `) +
+      verdict +
+      (lo >= 7 && use >= 0.5 ? tr('它用 CPU 的時間比睡覺多，卻被當成需要快速回應的程式。', ' It spends more time using the CPU than sleeping, yet is treated as a program that needs a fast response.') : '');
   };
   render();
 }

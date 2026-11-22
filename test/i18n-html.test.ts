@@ -15,7 +15,7 @@ const where = (s: string) => {
 
 /** 還沒翻的章節（翻完一章就從這裡拿掉） */
 const PENDING = new Set<string>([
-  'o1', 'why-o1', 'cfs', 'why', 'eevdf', 'preempt', 'slice', 'tradeoff', 'recap', 'glossary',
+  'cfs', 'why', 'eevdf', 'preempt', 'slice', 'tradeoff', 'recap', 'glossary',
 ]);
 
 interface Article {
@@ -137,7 +137,7 @@ function untranslated(src: string): string[] {
 /** 要檢查的檔案：小圖與原始碼頁。模擬頁、名詞表、決策說明另有 test/i18n.test.ts 實際產生字串來檢查 */
 const TS_FILES = ['learn.ts', 'start.ts', 'o1-widgets.ts', 'eevdf-widgets.ts', 'cost-widget.ts', 'source.ts', 'tour.ts'];
 /** 還沒翻的（翻完一個就從這裡拿掉） */
-const PENDING_TS = new Set<string>(['o1-widgets.ts', 'eevdf-widgets.ts', 'cost-widget.ts', 'source.ts']);
+const PENDING_TS = new Set<string>(['eevdf-widgets.ts', 'source.ts']);
 
 describe.each(TS_FILES.filter((f) => !PENDING_TS.has(f)).map((f) => [f]))('src/ui/%s', (f) => {
   test('讀者看得到的字串都經過 tr()', () => {

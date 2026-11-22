@@ -350,7 +350,7 @@
         </template>
       </article>
 
-      <article class="card explain chapter" data-ch="o1" data-title="O(1)：優先權加時間片" data-q="不照比例分，只排先後順序，夠用嗎？">
+      <article class="card explain chapter" data-ch="o1" data-title="O(1)：優先權加時間片" data-q="不照比例分，只排先後順序，夠用嗎？" data-title-en="O(1): priorities plus time slices" data-q-en="Is ordering by priority, without proportional shares, good enough?">
         <p><a class="chref" data-ref="lag"></a>有了衡量公平的尺，但 Linux 的 CPU scheduler 一開始並不是照比例分配 CPU 來設計的。2.6 的 O(1)（Ingo Molnar，2002 年）比較接近作業系統課本上的優先權排程：每個 task 有一個優先權和一段時間片（time slice），先挑優先權最高的，讓它跑完時間片再換人。這一章看它怎麼挑、怎麼分時間片，以及怎麼照顧 interactive task。</p>
 
         <h2>名字裡的 O(1)</h2>
@@ -416,9 +416,76 @@
           <p><code>expired_timestamp</code> 是這一輪第一次有 task 用完時間片的時刻，兩輪對調時歸零。<code>STARVATION_LIMIT</code> 是 1020 個 jiffy（約 1 秒），條件成立後，interactive task 用完時間片也得去下一輪。2.6.0 <code>kernel/sched.c</code> 的註解寫的是 “To guarantee that this does not starve expired tasks we ignore the interactivity of a task if the first expired task had to wait more than a 'reasonable' amount of time”。這是作業系統課本上 aging 的一種：等太久，優待就取消。不過門檻和 task 數成正比，三個 task 要等約 3 秒，對延遲來說已經很長。</p>
         </details>
         <p class="fine">簡化：小圖裡三個 task 都不睡覺，C 的 bonus 是直接給的；實際上 <code>sleep_avg</code> 每跑一點就扣一點。也沒有畫 <code>TIMESLICE_GRANULARITY</code>：interactive task 的時間片會切成小段，跑完一段就排到同一級的隊尾，和同一級的 task 輪流。</p>
+        <template lang="en">
+        <p><a class="chref" data-ref="lag"></a> gave us a ruler for fairness, but the Linux CPU scheduler was not originally designed to divide the CPU proportionally. The O(1) scheduler of 2.6 (Ingo Molnar, 2002) is closer to the priority scheduling of OS textbooks: each task has a priority and a time slice, the highest priority is picked first and runs out its time slice before the next one gets a turn. This chapter looks at how it picks, how it hands out time slices, and how it looks after interactive tasks.</p>
+
+        <h2>The O(1) in the name</h2>
+        <p>First, the 2.4 scheduler it replaced (O(n)). On every <code>schedule()</code>, 2.4 walks all tasks on the runqueue, scores each with <code>goodness()</code> and picks the highest:</p>
+        <div class="tex-block">\text{goodness}_i = \text{counter}_i + 20 - \text{nice}_i</div>
+        <p><code>counter</code> is the remaining time slice (in ticks); once it runs out, goodness is 0 and the task is not picked. With <span class="tex">n</span> tasks on the runqueue, each pick computes the score <span class="tex">n</span> times, and when the counters of all runnable tasks are used up, it walks every task in the system to hand out new time slices. With many tasks, the CPU scheduler itself becomes the burden.</p>
+        <p>O(1) gives each of the 140 priority levels its own queue and keeps a 140-bit bitmap of which levels have tasks. Smaller numbers are higher priority, so picking means finding the first non-empty queue and taking its head:</p>
+        <div class="tex-block">p^{*} = \min\{\, p \mid \text{queue}[p] \ne \varnothing \,\}</div>
+        <p><code>sched_find_first_bit()</code> does this by finding the first 1 in the bitmap, in a fixed number of steps no matter how many tasks there are. That is the O(1) in the name.</p>
+
+        <h2>What happens with many tasks</h2>
+        <p>Put <span class="tex">n</span> tasks that always want the CPU on the runqueue and count the comparisons each <code>schedule()</code> makes. "One step" here is the simulator's cost model: one <code>goodness()</code> call, one bitmap lookup, or one level of a red-black tree each count as one.</p>
+        <div class="tex-block">\text{cost}_{2.4} \approx n + 1, \qquad \text{cost}_{2.6.0} = 1</div>
+        <p>The extra one in 2.4 is prev. When prev still wants to run, its goodness is computed first as a candidate, then the whole runqueue is walked, and prev is on the runqueue too. The <code>for_each_task</code> loop that recalculates time slices is also O(n), but it happens only about once every <span class="tex">n</span> picks, so amortized it adds only a little to each. 2.6.0 moves "time slice used up, move to the next round" into <code>scheduler_tick()</code>, leaving <code>schedule()</code> itself with just a bitmap lookup.</p>
+        <div class="widget" id="w-cost"></div>
+        <p class="try">Each step on the horizontal axis doubles the number of tasks. The cost of 2.4 doubles along with it, so the line gets steeper to the right; 2.6.0 is flat. Press "Zoom in" to see the later CFS and EEVDF: they keep tasks in a red-black tree (<a class="chref" data-ref="cfs"></a>), so the cost grows with <span class="tex">\log n</span>, one or two more levels per doubling, which is a straight line on this chart. CFS takes the cached leftmost node when picking, so its cost is in putting prev back into the tree and taking next out; EEVDF's <code>pick_eevdf()</code> has to walk down the tree to find the earliest deadline among the eligible tasks, so picking itself also grows with <span class="tex">\log n</span>.</p>
+        <p class="fine">The cost model counts only comparisons and nodes visited, not CPU time. Real 2.4 had two more costs this site does not simulate: each task walked means reading its <code>task_struct</code>, so cache misses grow with <span class="tex">n</span>; and on multiple cores the whole runqueue shares one lock. The workload is also the worst case, with all <span class="tex">n</span> tasks runnable; on a typical desktop few tasks are runnable at the same time.</p>
+        <details class="deep">
+          <summary>Deeper: the 2.4 counter quietly looked after sleepers too</summary>
+          <p>When 2.4 hands out new time slices, <code>for_each_task</code> walks every task in the system, sleeping ones included:</p>
+          <div class="tex-block">\text{counter} \leftarrow \left\lfloor \frac{\text{counter}}{2} \right\rfloor + T, \qquad T = \texttt{NICE\_TO\_TICKS}(\text{nice})</div>
+          <p>A CPU-bound task always uses its counter down to 0, so after recalculation it has <span class="tex">T</span>. A task that keeps sleeping never uses it up; each recalculation keeps half and adds <span class="tex">T</span>, approaching the fixed point <span class="tex">c = c/2 + T</span>, that is, <span class="tex">c = 2T</span>. A larger counter means higher goodness, so a sleeper that wakes up usually gets ahead of the CPU-bound tasks, but at most by one extra time slice.</p>
+        </details>
+
+        <h2>Time slices and priorities</h2>
+        <p>nice is first converted to <code>static_prio</code>:</p>
+        <div class="tex-block">\texttt{static\_prio} = 120 + \text{nice}</div>
+        <p>100 to 139 are for normal tasks; 0 to 99 are reserved for real-time. Time slices are assigned linearly in <code>static_prio</code> (<code>BASE_TIMESLICE</code>; with HZ = 1000 the unit is ms, integer division):</p>
+        <div class="tex-block">\text{slice} = 10 + \left\lfloor \frac{190 \times (139 - \texttt{static\_prio})}{39} \right\rfloor</div>
+        <table class="mini eq-ex">
+          <thead><tr><th>nice</th><th><code>static_prio</code></th><th>time slice</th></tr></thead>
+          <tbody>
+            <tr><td>−20</td><td>100</td><td>200 ms</td></tr>
+            <tr><td>0</td><td>120</td><td>102 ms</td></tr>
+            <tr><td>5</td><td>125</td><td>78 ms</td></tr>
+            <tr><td>19</td><td>139</td><td>10 ms</td></tr>
+          </tbody>
+        </table>
+        <p>What is actually used for ordering is not <code>static_prio</code> but <code>prio</code>, which adds or subtracts a bonus on top of it; the last section covers that.</p>
+
+        <h2>Two rounds: active and expired</h2>
+        <p>Each runqueue has two <code>prio_array</code>s. The CPU scheduler picks only from "this round" (active). When a task uses up its time slice, <code>scheduler_tick()</code> recalculates its time slice and <code>prio</code> and puts it into "the next round" (expired). Once this round is empty, <code>schedule()</code> swaps the two pointers and the next round begins. Swapping pointers takes constant time, so unlike 2.4, O(1) never has to walk all tasks to hand out time slices.</p>
+        <p>If all tasks are CPU-bound and none is treated as interactive, each task runs its own time slice once per round, and the shares are the ratio of the time slices:</p>
+        <div class="tex-block">\text{share}_i = \frac{\text{slice}_i}{\sum_j \text{slice}_j}</div>
+        <p>For example, with one nice 0 and one nice 5 task, the nice 0 one gets <span class="tex">102 / (102 + 78) \approx 56.7\%</span>. The weights from <a class="chref" data-ref="weight"></a> give <span class="tex">1024 / (1024 + 335) \approx 75.3\%</span>. For the same nice values, the two generations of CPU scheduler give very different shares; the next chapter comes back to this.</p>
+        <div class="widget" id="w-o1arrays"></div>
+        <p class="try">First press "Run one time slice" a few times and watch A, B and C move from this round to the next, and the swap when this round empties. Then make C interactive and press "Run 30" to see how long A and B wait before their turn comes round again.</p>
+
+        <h2>Looking after interactive tasks: sleep_avg and the bonus</h2>
+        <p>Going by nice alone, an editor that wakes up has to queue behind a compiler at the same level and may wait a whole time slice (102ms), so typing stutters. O(1) has no interface for a task to say "I need a fast response"; it can only guess from behaviour: a task that sleeps a lot is probably interactive. Each task has a <code>sleep_avg</code> (0 to 1020ms) that grows while it sleeps and shrinks while it runs on the CPU, and that is converted into a bonus:</p>
+        <div class="tex-block">\texttt{CURRENT\_BONUS} = \left\lfloor \frac{\texttt{sleep\_avg} \times 10}{1020} \right\rfloor, \qquad \text{bonus} = \texttt{CURRENT\_BONUS} - 5, \qquad \texttt{prio} = \texttt{static\_prio} - \text{bonus}</div>
+        <p>The bonus ranges from −5 to +5. A nice 0 task with a full <code>sleep_avg</code> is at prio 115; one that runs all the time is at prio 125. This prio is used in two ways:</p>
+        <ul>
+          <li>On wakeup, if the woken task's prio is smaller than that of the running task, it preempts it (<code>TASK_PREEMPTS_CURR</code>). The bonus is what lets the editor interrupt the build when it wakes up.</li>
+          <li>When its time slice runs out, a task that is interactive enough goes back into this round instead of waiting for the next. The condition is <code>TASK_INTERACTIVE</code>:</li>
+        </ul>
+        <div class="tex-block">\texttt{prio} \le \texttt{static\_prio} - \Delta(\text{nice}), \qquad \Delta(0) = 2</div>
+        <p>For nice 0 this means bonus ≥ +2, that is, <code>CURRENT_BONUS</code> ≥ 7 and <code>sleep_avg</code> ≥ 714ms. The larger the nice value, the larger <span class="tex">\Delta</span> and the harder it is to count as interactive; nice 19 never does. "Make C interactive" in the chart above is the second rule: C is at prio 118 and goes back into this round every time it finishes its time slice, while A and B at prio 125 can only keep waiting.</p>
+        <details class="deep">
+          <summary>Deeper: EXPIRED_STARVING, insurance against starvation</summary>
+          <p>An interactive task can stay in this round indefinitely, so other tasks may never get a turn. Before putting an interactive task back into this round, <code>scheduler_tick()</code> first checks <code>EXPIRED_STARVING()</code>:</p>
+          <div class="tex-block">\text{now} - \texttt{expired\_timestamp} \;\ge\; \texttt{STARVATION\_LIMIT} \times \texttt{nr\_running} + 1</div>
+          <p><code>expired_timestamp</code> is when a task first used up its time slice in this round; it is reset when the rounds swap. <code>STARVATION_LIMIT</code> is 1020 jiffies (about one second). Once the condition holds, an interactive task that uses up its time slice has to go to the next round too. The comment in 2.6.0 <code>kernel/sched.c</code> reads “To guarantee that this does not starve expired tasks we ignore the interactivity of a task if the first expired task had to wait more than a 'reasonable' amount of time”. This is a form of the aging found in OS textbooks: wait too long and the special treatment is withdrawn. The threshold grows with the number of tasks, though; with three tasks it is about 3 seconds, which is very long as far as latency goes.</p>
+        </details>
+        <p class="fine">Simplifications: none of the three tasks in the chart sleeps, and C's bonus is simply given; in reality <code>sleep_avg</code> drops a little with every bit of running. <code>TIMESLICE_GRANULARITY</code> is not shown either: an interactive task's time slice is cut into small pieces, and after each piece it goes to the tail of its level to take turns with tasks at the same level.</p>
+        </template>
       </article>
 
-      <article class="card explain chapter" data-ch="why-o1" data-title="為什麼離開 O(1)" data-q="挑選已經是常數時間了，為什麼還要換掉？">
+      <article class="card explain chapter" data-ch="why-o1" data-title="為什麼離開 O(1)" data-q="挑選已經是常數時間了，為什麼還要換掉？" data-title-en="Why Linux moved on from O(1)" data-q-en="Picking was already constant time, so why replace it?">
         <p>O(1) 解決的是 2.4 的成本問題，這件事它做得很好。它被換掉，原因在上一章的最後一節：它得猜誰是 interactive。這一章先算出它怎麼被騙，再看為了防騙補上的規則，最後是 2007 年 CFS 登場時怎麼說。</p>
 
         <h2>sleep_avg 怎麼加、怎麼扣</h2>
@@ -490,6 +557,79 @@
             <li><a href="https://elixir.bootlin.com/linux/v2.6.0/source/kernel/sched.c" target="_blank" rel="noopener">2.6.0 <code>kernel/sched.c</code></a>：<code>recalc_task_prio()</code>、<code>scheduler_tick()</code>、<code>schedule()</code> 與檔案開頭的巨集</li>
           </ul>
         </details>
+        <template lang="en">
+        <p>O(1) solved the cost problem of 2.4, and it did that well. It was replaced because of the last section of the previous chapter: it had to guess who was interactive. This chapter first works out how it can be fooled, then looks at the rules added to prevent that, and finally at what was said when CFS arrived in 2007.</p>
+
+        <h2>How sleep_avg goes up and down</h2>
+        <p>When a task wakes up, <code>recalc_task_prio()</code> adds the sleep time <span class="tex">s</span> to <code>sleep_avg</code>, but first multiplies it by a factor that is larger the lower <code>sleep_avg</code> is:</p>
+        <div class="tex-block">\texttt{sleep\_avg} \leftarrow \min\bigl(1020,\; \texttt{sleep\_avg} + s \times (10 - \texttt{CURRENT\_BONUS})\bigr)</div>
+        <p>(When <code>CURRENT_BONUS</code> is 10 the factor is 1.) Time <span class="tex">r</span> spent running on the CPU is subtracted as is by <code>schedule()</code>:</p>
+        <div class="tex-block">\texttt{sleep\_avg} \leftarrow \max(0,\; \texttt{sleep\_avg} - r)</div>
+        <p>The kernel comment says “The lower the sleep avg a task has the more rapidly it will rise with sleep time.” The intent is for a task that has just turned from CPU-bound to interactive, such as a shell back at its prompt waiting for the keyboard after a build, to regain its bonus quickly. One millisecond of sleep can offset up to 10ms of running, and that asymmetry is what can be exploited.</p>
+
+        <h2>Using 75% of the CPU and still interactive</h2>
+        <p>A task repeats "run <span class="tex">r</span>, sleep <span class="tex">s</span>". With <code>CURRENT_BONUS</code> at <span class="tex">b</span>, one sleep adds <span class="tex">s\,(10 - b)</span> and one run subtracts <span class="tex">r</span>. While more is added than subtracted, <code>sleep_avg</code> climbs; it stops once that is no longer so. The break-even point is</p>
+        <div class="tex-block">s\,(10 - b) = r \quad\Longrightarrow\quad b^{*} = 10 - \frac{r}{s}</div>
+        <p><code>CURRENT_BONUS</code> is an integer, so <code>sleep_avg</code> gets stuck oscillating around the lower edge of level <span class="tex">\lceil b^{*} \rceil</span>: right after waking it is at <span class="tex">\lceil b^{*} \rceil</span>, and as it runs it drops to <span class="tex">\lfloor b^{*} \rfloor</span>. Time slices mostly run out while the task is running, and at that point it needs <span class="tex">\lfloor b^{*} \rfloor \ge 7</span> (bonus ≥ +2 for nice 0, from the previous chapter) to stay in this round:</p>
+        <div class="tex-block">10 - \frac{r}{s} \ge 7 \;\Longleftrightarrow\; r \le 3s \;\Longleftrightarrow\; \frac{r}{r + s} \le 75\%</div>
+        <p>In other words, as long as it sleeps at least 1ms for every 3ms it runs, a task using three quarters of the CPU gets all the privileges of an interactive task. The threshold on wakeup is even looser: it only needs <span class="tex">\lceil b^{*} \rceil \ge 7</span>, that is <span class="tex">r &lt; 4s</span>, so any task using under 80% counts as interactive when it wakes up. In scenario 3, cheat runs 2.3ms and sleeps 0.83ms, so <span class="tex">r/s \approx 2.77</span> and <span class="tex">b^{*} \approx 7.23</span>; it oscillates between 7 and 8 and passes both thresholds.</p>
+        <div class="widget" id="w-sleepavg"></div>
+        <p class="try">Press "cheat", then slowly drag "sleep each time" down: below 0.77ms (<span class="tex">2.3 / 3</span>) the task drops out of the interactive zone halfway through each run; below 0.58ms (<span class="tex">2.3 / 4</span>) it no longer counts even right after waking. Press "run 3, sleep 0.8" for the case in between: <span class="tex">r/s = 3.75</span>, the bonus is +2 right after waking and drops to +1 while running.</p>
+        <p>Once judged interactive, cheat can interrupt cc when it wakes up (prio 117–118 beats 125), and stays in this round when its time slice runs out. CPU share cheat gets in 2 seconds of scenario 3 on the Simulate page:</p>
+        <table class="mini eq-ex">
+          <thead><tr><th></th><th>cheat's CPU share</th></tr></thead>
+          <tbody>
+            <tr><td>GPS (fair share)</td><td><span data-sim="cheat gps cheat.share">29.8%</span></td></tr>
+            <tr><td>O(1) 2.6.0</td><td><span data-sim="cheat o1-v2.6.0 cheat.share">67.0%</span></td></tr>
+            <tr><td>O(1), <code>TASK_INTERACTIVE</code> off</td><td><span data-sim="cheat o1-v2.6.0 -TASK_INTERACTIVE cheat.share">33.7%</span></td></tr>
+            <tr><td>O(1), <code>sleep_avg</code> off</td><td><span data-sim="cheat o1-v2.6.0 -sleep_avg cheat.share">1.3%</span></td></tr>
+            <tr><td>CFS v2.6.24</td><td><span data-sim="cheat cfs-v2.6.24 cheat.share">32.7%</span></td></tr>
+          </tbody>
+        </table>
+        <p>With <code>TASK_INTERACTIVE</code> off, cheat has to go to the next round when its time slice runs out, and its share falls back to about a third, so what it mainly stole was the privilege of "not waiting for the next round after using up the time slice". Turning <code>sleep_avg</code> off overcorrects: cheat can no longer fool the scheduler, but genuinely interactive tasks lose their care too. In scenario 4, audio waits <span data-sim="latency o1-v2.6.0 -sleep_avg audio.lat">189ms</span> on average and gets only <span data-sim="latency o1-v2.6.0 -sleep_avg audio.share">0.17%</span>. This is the only tool O(1) has for looking after interactive tasks; it cannot be removed, only patched further. <a href="#/sim/cheat">See scenario 3 on the Simulate page →</a></p>
+
+        <h2>More and more rules</h2>
+        <p>The top of 2.6.0 <code>kernel/sched.c</code> says “2003-09-03 Interactivity tuning by Con Kolivas.” Around <code>recalc_task_prio()</code> and <code>schedule()</code> alone there are these rules, each handling one kind of misjudgement:</p>
+        <table class="mini eq-ex wrap rules">
+          <thead><tr><th>Rule</th><th>What it does</th><th>What it guards against</th></tr></thead>
+          <tbody>
+            <tr><td><code>JUST_INTERACTIVE_SLEEP</code></td><td>A task that slept over 815ms (nice 0) gets <code>sleep_avg</code> set straight to 918ms, just enough to be interactive, not full marks</td><td>A task that slept a long time becoming CPU-bound after waking and starving others with a full bonus</td></tr>
+            <tr><td><code>interactive_credit</code></td><td>+1 each time <code>sleep_avg</code> fills up, −1 each time it drains to 0. High credit means less is subtracted while running; low credit means one sleep counts for at most one time slice</td><td>CPU-bound tasks that sleep now and then getting a bonus; truly interactive tasks dropping out as soon as they get busy</td></tr>
+            <tr><td><code>activated = -1</code></td><td>A task woken from uninterruptible sleep (usually waiting on disk) can raise <code>sleep_avg</code> at most to <code>JUST_INTERACTIVE_SLEEP</code></td><td>What the comment calls “likely to be cpu hogs waiting on I/O”</td></tr>
+            <tr><td><code>ON_RUNQUEUE_WEIGHT</code></td><td>Time spent waiting on the runqueue after waking also counts as sleep; fully if woken by an interrupt, only 30% if woken by another task</td><td>Interactive tasks losing points because they waited long after waking</td></tr>
+            <tr><td><code>TIMESLICE_GRANULARITY</code></td><td>An interactive task's time slice is cut into small pieces, taking turns with its level</td><td>One of two interactive tasks at the same level holding the CPU for 100ms</td></tr>
+            <tr><td><code>EXPIRED_STARVING</code></td><td>If the next round has waited too long, interactive privileges are withdrawn</td><td>Interactive tasks staying in this round forever</td></tr>
+          </tbody>
+        </table>
+        <p>Each rule makes sense on its own, but stacked together it becomes hard to predict how a workload will be classified, and every new rule is one more pattern to exploit. The CFS announcement called this out too, saying CFS “is not prone to any of the 'attacks' that exist today against the heuristics of the stock scheduler”.</p>
+
+        <h2>nice does not mean the same thing everywhere</h2>
+        <p>Another problem gets mentioned less. Time slices are linear in <code>static_prio</code>, so "one nice level apart" has different effects at different positions. For two CPU-bound tasks, O(1) divides by the ratio of time slices and CFS by the ratio of weights:</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>nice of the two tasks</th><th>O(1) time slices</th><th>O(1), first gets</th><th>CFS weights</th><th>CFS, first gets</th></tr></thead>
+          <tbody>
+            <tr><td>0 and 1</td><td>102 : 97</td><td>51.3%</td><td>1024 : 820</td><td>55.5%</td></tr>
+            <tr><td>18 and 19</td><td>14 : 10</td><td>58.3%</td><td>18 : 15</td><td>54.5%</td></tr>
+            <tr><td>0 and 5</td><td>102 : 78</td><td>56.7%</td><td>1024 : 335</td><td>75.3%</td></tr>
+          </tbody>
+        </table>
+        <p>Around nice 0, one level apart in O(1) means time slices only 5% apart; around nice 19, 14ms against 10ms is 40% apart. The CFS weight table differs by about 1.25× at every level (<a class="chref" data-ref="weight"></a>), so one level apart has the same effect wherever you start.</p>
+
+        <h2>2007: no more guessing</h2>
+        <p>In 2007 Con Kolivas proposed RSDL (later renamed SD, Staircase Deadline), which did not estimate interactivity at all and relied only on fair rules, with desktop responsiveness just as good. In April the same year Ingo Molnar announced CFS, saying in the announcement:</p>
+        <blockquote>Thus the CFS scheduler has no notion of 'timeslices' and has no heuristics whatsoever.</blockquote>
+        <p>He also said CFS “has no 'array switch' artifacts (by which both the vanilla scheduler and RSDL/SD are affected)”, and credited the direction to Kolivas: “he has proven via RSDL/SD that 'fair scheduling' is possible and that it results in better desktop scheduling. Kudos Con!”</p>
+        <p>CFS was merged in 2.6.23 (October 2007), and <code>sleep_avg</code>, the bonus and the two rounds were gone. It took the approach of <a class="chref" data-ref="lag"></a> instead: divide by weight and record how much each task has run. An interactive task is not running while it sleeps, so it naturally falls behind, and when it wakes up it is naturally picked, no guessing needed. The next chapter shows how this is written as vruntime, and why this "naturally" also needs a cap. As <a class="chref" data-ref="why"></a> shows, though, CFS later slowly grew heuristics of its own.</p>
+
+        <details class="deep">
+          <summary>Sources</summary>
+          <ul class="refs">
+            <li><a href="https://lwn.net/Articles/230501/" target="_blank" rel="noopener">[Announce] [patch] Modular Scheduler Core and Completely Fair Scheduler [CFS]</a> (Ingo Molnar, 2007-04-13, the original LKML post archived by LWN)</li>
+            <li><a href="https://lwn.net/Articles/230574/" target="_blank" rel="noopener">LWN: Schedulers: the plot thickens</a> (2007-04-17)</li>
+            <li><a href="https://elixir.bootlin.com/linux/v2.6.0/source/kernel/sched.c" target="_blank" rel="noopener">2.6.0 <code>kernel/sched.c</code></a>: <code>recalc_task_prio()</code>, <code>scheduler_tick()</code>, <code>schedule()</code> and the macros at the top of the file</li>
+          </ul>
+        </details>
+        </template>
       </article>
 
       <article class="card explain chapter" data-ch="cfs" data-title="CFS：讓 vruntime 齊頭並進" data-q="只記一個數字，能不能做到公平？">

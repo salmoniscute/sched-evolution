@@ -1,6 +1,7 @@
 // 學習路線第 4 章的小圖（比較情境 1）：N 個 CPU-bound task 時，每次 schedule() 的成本。
 // 數字用模擬核心現場跑（src/cost.ts），成本是「比較／走訪節點的次數」的模型，不是 CPU cycle。
 import { COST_NS, COST_VARIANTS, costCurves, type CostPoint } from '../cost.ts';
+import { joinList, tr } from '../i18n.ts';
 import { variants } from '../variants.ts';
 
 const SHORT: Record<string, string> = {
@@ -18,11 +19,11 @@ function costWidget(box: HTMLElement): void {
   let zoom = false;
 
   box.innerHTML = `<div class="w-btns">
-      <button type="button" data-z="0">全部</button>
-      <button type="button" data-z="1">放大看 O(1)、CFS、EEVDF</button>
+      <button type="button" data-z="0">${tr('全部', 'All')}</button>
+      <button type="button" data-z="1">${tr('放大看 O(1)、CFS、EEVDF', 'Zoom in on O(1), CFS, EEVDF')}</button>
     </div>
     <div class="w-sliders">
-      <label class="w-slice s4">runqueue 上有 <input type="range" min="0" max="${COST_NS.length - 1}" step="1" aria-label="task 數"><output></output> 個 task</label>
+      <label class="w-slice s4">${tr('runqueue 上有', 'tasks on the runqueue:')} <input type="range" min="0" max="${COST_NS.length - 1}" step="1" aria-label="${tr('task 數', 'number of tasks')}"><output></output>${tr(' 個 task', '')}</label>
     </div>
     <div class="w-svg"></div>
     <table class="mini eq-ex w-cost"></table>
@@ -79,15 +80,15 @@ function costWidget(box: HTMLElement): void {
     labels.sort((a, b) => b.y - a.y);
     for (let i = 1; i < labels.length; i++) labels[i]!.y = Math.min(labels[i]!.y, labels[i - 1]!.y - 14);
     const labelSvg = labels.map((l) => `<text class="dg-l ${l.cls}" x="${X1 + 8}" y="${l.y}" style="fill:var(--c)">${l.text}</text>`).join('');
-    svgBox.innerHTML = `<svg viewBox="0 0 640 228" role="img" aria-label="每次 schedule() 的成本隨 task 數的變化">
+    svgBox.innerHTML = `<svg viewBox="0 0 640 228" role="img" aria-label="${tr('每次 schedule() 的成本隨 task 數的變化', 'Cost of each schedule() as the number of tasks grows')}">
       <defs><clipPath id="cost-clip"><rect x="${X0 - 6}" y="${Y1 - 6}" width="${X1 - X0 + 12}" height="${Y0 - Y1 + 12}"/></clipPath></defs>
       ${grid}
       <line class="dg-ref" x1="${x(idx)}" x2="${x(idx)}" y1="${Y1}" y2="${Y0}"/>
       <line class="dg-axis" x1="${X0}" x2="${X1}" y1="${Y0}" y2="${Y0}"/>
       <g clip-path="url(#cost-clip)">${paths.join('')}</g>
       ${labelSvg}
-      <text class="dg-s" x="${X0 - 44}" y="${Y1 - 4}">次數</text>
-      <text class="dg-s" x="${X1 + 24}" y="${Y0 + 16}">task 數</text>
+      <text class="dg-s" x="${X0 - 44}" y="${Y1 - 4}">${tr('次數', 'steps')}</text>
+      <text class="dg-s" x="${X1 + 24}" y="${Y0 + 16}">${tr('task 數', 'tasks')}</text>
       ${xt}
     </svg>`;
 
@@ -96,15 +97,18 @@ function costWidget(box: HTMLElement): void {
       return `<tr><td><span class="swatch" style="background:var(--series-${k + 1})"></span>${variants.find((v) => v.id === id)!.title}</td>
         <td>${f1(p.by.pick)}</td><td>${f1(p.by.queue)}</td><td>${p.by.recalc ? f1(p.by.recalc) : '—'}</td><td><b>${f1(p.total)}</b></td></tr>`;
     }).join('');
-    table.innerHTML = `<thead><tr><th>${n} 個 task</th><th>挑選</th><th>進出佇列</th><th>重算時間片</th><th>每次 schedule() 合計</th></tr></thead><tbody>${rows}</tbody>`;
+    table.innerHTML = `<thead><tr><th>${tr(`${n} 個 task`, `${n} tasks`)}</th><th>${tr('挑選', 'pick')}</th><th>${tr('進出佇列', 'enqueue / dequeue')}</th><th>${tr('重算時間片', 'recalculate slices')}</th><th>${tr('每次 schedule() 合計', 'total per schedule()')}</th></tr></thead><tbody>${rows}</tbody>`;
 
     const at = (id: string) => curves!.get(id)![idx]!.total;
     const on = at('on-v2.4.0');
     const o1 = at('o1-v2.6.0');
     out.textContent =
       n === 1
-        ? '只有一個 task 時，大家都差不多。把拉桿往右拖。'
-        : `${n} 個 task 時，2.4 每次 schedule() 要做 ${f1(on)} 次比較，是 2.6.0 的 ${f1(on / o1)} 倍；CFS 和 EEVDF 是 ${f1(at('cfs-v2.6.24'))}、${f1(at('eevdf-v6.6'))} 次，task 數每翻一倍，只多兩三次。`;
+        ? tr('只有一個 task 時，大家都差不多。把拉桿往右拖。', 'With only one task they are all about the same. Drag the slider to the right.')
+        : tr(
+            `${n} 個 task 時，2.4 每次 schedule() 要做 ${f1(on)} 次比較，是 2.6.0 的 ${f1(on / o1)} 倍；CFS 和 EEVDF 是 ${joinList([f1(at('cfs-v2.6.24')), f1(at('eevdf-v6.6'))])} 次，task 數每翻一倍，只多兩三次。`,
+            `With ${n} tasks, each schedule() in 2.4 makes ${f1(on)} comparisons, ${f1(on / o1)}× as many as 2.6.0. CFS and EEVDF make ${f1(at('cfs-v2.6.24'))} and ${f1(at('eevdf-v6.6'))}, only two or three more each time the number of tasks doubles.`,
+          );
   };
   render();
 }
