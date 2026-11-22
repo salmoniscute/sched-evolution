@@ -141,7 +141,7 @@
         <aside class="toc" aria-label="章節" data-en-aria="Chapters"><ol id="learnToc"></ol></aside>
         <div class="chapters">
 
-      <article class="card explain chapter" data-ch="problem" data-title="CPU scheduler 要解決什麼問題" data-q="只有一顆 CPU，該讓誰先執行？">
+      <article class="card explain chapter" data-ch="problem" data-title="CPU scheduler 要解決什麼問題" data-q="只有一顆 CPU，該讓誰先執行？" data-title-en="What problem does a CPU scheduler solve" data-q-en="With only one CPU, who should run first?">
         <p>系統只有一顆 CPU，上面同時有好幾個 task（執行中的程式，以下都用 task 稱呼）。任何時刻只有一個 task 能在 CPU 上執行，其他想執行的 task 只能在 runqueue 裡排隊；還有一些 task 正在等待鍵盤輸入、磁碟或計時器，處於 sleep 狀態，暫時不需要 CPU。</p>
         <figure class="dg">
           <svg viewBox="0 0 640 210" role="img" aria-label="程式的三種狀態與轉換">
@@ -169,9 +169,38 @@
         </figure>
         <p>那麼該挑誰呢？這取決於 task 需要什麼。像播放音樂、文字編輯器這類 interactive 的 task，平常大多在 sleep，每次醒來只用一點點 CPU，但必須馬上得到執行，否則就會聽到斷音、看到畫面卡頓，因此它們在意的是<b>延遲</b>（latency）。相對地，編譯這類 CPU-bound 的 task 永遠有事可做，晚個幾毫秒執行並無所謂，它們在意的是一段時間下來是否拿到<b>公平</b>的 CPU 份額。</p>
         <p>麻煩的是，這兩種需求會互相拉扯：讓音樂播放器插隊固然降低了延遲，但它插隊所用的時間，其實是從編譯 task 那裡拿走的。接下來幾章先把「公平」定義清楚，再看各代 CPU scheduler 怎麼回答：O(1) 用優先權加時間片，從行為猜誰需要快速回應；CFS 和 EEVDF 先保證公平，再在公平之上處理延遲。</p>
+        <template lang="en">
+        <p>The system has a single CPU and several tasks (running programs; we call them tasks throughout). At any moment only one task can run on the CPU, and the others that want to run wait in line on the runqueue. Some tasks are waiting for keyboard input, the disk or a timer; they are asleep and do not need the CPU for now.</p>
+        <figure class="dg">
+          <svg viewBox="0 0 640 210" role="img" aria-label="The three states of a task and the transitions between them">
+            <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="dg-head"/></marker></defs>
+            <rect class="dg-box run" x="250" y="14" width="140" height="44" rx="8"/>
+            <text class="dg-t" x="320" y="34" text-anchor="middle">Running</text>
+            <text class="dg-s" x="320" y="50" text-anchor="middle">dark on the timeline</text>
+            <rect class="dg-box wait" x="40" y="146" width="150" height="44" rx="8"/>
+            <text class="dg-t" x="115" y="166" text-anchor="middle">Waiting to run</text>
+            <text class="dg-s" x="115" y="182" text-anchor="middle">light</text>
+            <rect class="dg-box" x="450" y="146" width="150" height="44" rx="8"/>
+            <text class="dg-t" x="525" y="166" text-anchor="middle">Asleep</text>
+            <text class="dg-s" x="525" y="182" text-anchor="middle">blank</text>
+            <line class="dg-a" x1="150" y1="146" x2="258" y2="60" marker-end="url(#arr)"/>
+            <text class="dg-l" x="150" y="96" text-anchor="end">picked</text>
+            <line class="dg-a" x1="282" y1="60" x2="178" y2="146" marker-end="url(#arr)"/>
+            <text class="dg-l" x="242" y="120">switched out</text>
+            <text class="dg-s" x="242" y="135">(time used up, or preempted)</text>
+            <line class="dg-a" x1="370" y1="60" x2="490" y2="146" marker-end="url(#arr)"/>
+            <text class="dg-l" x="446" y="96">goes to sleep</text>
+            <line class="dg-a" x1="450" y1="174" x2="192" y2="174" marker-end="url(#arr)"/>
+            <text class="dg-l" x="321" y="166" text-anchor="middle">wakes up</text>
+          </svg>
+          <figcaption>The CPU scheduler picks again at three moments: when the current task goes to sleep and the CPU becomes free; at the tick, once every 1ms, to check whether the current task has used up the time it should get; and when a task wakes up (or is created), to decide whether it should preempt the current task.</figcaption>
+        </figure>
+        <p>So whom should it pick? That depends on what the tasks need. Interactive tasks such as a music player or a text editor spend most of their time asleep and use only a little CPU each time they wake, but they must run right away, or you hear the audio drop out and see the screen stall. What they care about is <b>latency</b>. CPU-bound tasks such as a compiler, on the other hand, always have work to do; running a few milliseconds later does not matter to them. What they care about is whether, over a stretch of time, they get a <b>fair</b> share of the CPU.</p>
+        <p>The trouble is that the two needs pull against each other: letting the music player jump the queue does lower its latency, but the time it spends doing so is taken from the compiler. The next few chapters first pin down what "fair" means, then look at how each generation of CPU scheduler answers the question. O(1) uses priorities plus time slices and guesses from behaviour who needs a fast response; CFS and EEVDF guarantee fairness first and handle latency on top of it.</p>
+        </template>
       </article>
 
-      <article class="card explain chapter" data-ch="weight" data-title="公平的定義：權重" data-q="每個 task 應該分到多少 CPU？">
+      <article class="card explain chapter" data-ch="weight" data-title="公平的定義：權重" data-q="每個 task 應該分到多少 CPU？" data-title-en="Defining fairness: weights" data-q-en="How much CPU should each task get?">
         <p>要談公平，得先定義每個 task 應該分到多少。Linux 讓使用者用 nice 值（−20 到 19）表達優先程度，nice 越小越優先。kernel 用 <code>prio_to_weight[]</code> 這張表把 nice 換成權重 <span class="tex">w</span>，表的設計是 nice 0 對應 1024，每差一級約差 1.25 倍：</p>
         <div class="tex-block">w(\text{nice}) \approx \frac{1024}{1.25^{\,\text{nice}}}</div>
         <p>例如 nice 5 是 <span class="tex">1024 / 1.25^5 \approx 335</span>，nice −5 是 <span class="tex">1024 \times 1.25^5 \approx 3121</span>（表裡存的是取整後的值）。有了權重，公平就能寫成一條式子：task <span class="tex">i</span> 應得的 CPU 比例是</p>
@@ -180,9 +209,19 @@
         <div class="tex-block">\text{share}_A = \frac{3121}{3121 + 1024 + 335} = \frac{3121}{4480} \approx 69.7\%</div>
         <p>拖動 nice 值，圖下方會代入新的數字重算：</p>
         <div class="widget" id="w-weight"></div>
+        <template lang="en">
+        <p>To talk about fairness we first have to define how much each task should get. Linux lets users express priority with a nice value (−20 to 19); the smaller the nice value, the higher the priority. The kernel turns nice into a weight <span class="tex">w</span> with the table <code>prio_to_weight[]</code>. The table is designed so that nice 0 maps to 1024 and each level differs by about 1.25×:</p>
+        <div class="tex-block">w(\text{nice}) \approx \frac{1024}{1.25^{\,\text{nice}}}</div>
+        <p>For example, nice 5 is <span class="tex">1024 / 1.25^5 \approx 335</span> and nice −5 is <span class="tex">1024 \times 1.25^5 \approx 3121</span> (the table stores rounded values). With weights, fairness becomes a formula: the share of the CPU task <span class="tex">i</span> is entitled to is</p>
+        <div class="tex-block">\text{share}_i = \frac{w_i}{W}, \qquad W = \sum_{j \,\in\, \text{runnable}} w_j</div>
+        <p><span class="tex">W</span> sums only over tasks that want to run (runnable). Sleeping tasks are not counted, so when a task goes to sleep, the shares of the others grow. In the chart below, A, B and C start at nice −5, 0 and 5, so A is entitled to</p>
+        <div class="tex-block">\text{share}_A = \frac{3121}{3121 + 1024 + 335} = \frac{3121}{4480} \approx 69.7\%</div>
+        <p>Drag the nice values and the numbers below the chart are recalculated:</p>
+        <div class="widget" id="w-weight"></div>
+        </template>
       </article>
 
-      <article class="card explain chapter" data-ch="lag" data-title="理想的參考：GPS 與 lag" data-q="怎麼量一個 CPU scheduler 離公平多遠？">
+      <article class="card explain chapter" data-ch="lag" data-title="理想的參考：GPS 與 lag" data-q="怎麼量一個 CPU scheduler 離公平多遠？" data-title-en="The ideal reference: GPS and lag" data-q-en="How do we measure how far a CPU scheduler is from fair?">
         <p>理想情況下，想執行的 task 會「同時」以各自的比例前進，就像水流同時分給幾根管子。這個假想的模型稱為 GPS（Generalized Processor Sharing）。在 GPS 裡，經過時間 <span class="tex">t</span>，task <span class="tex">i</span> 應該拿到的 CPU 時間是（假設這段期間想執行的 task 沒有變）</p>
         <div class="tex-block">S_i = \frac{w_i}{W}\, t</div>
         <p>真實的 CPU 一次只能執行一個 task，CPU scheduler 只能讓它們輪流執行。把 task <span class="tex">i</span> 實際拿到的時間記為 <span class="tex">s_i</span>，兩者的差就是 lag：</p>
@@ -245,6 +284,70 @@
           <div class="tex-block">\sum_i \frac{dS_i}{dt} = \sum_i \frac{w_i}{W} = 1, \qquad \sum_i \frac{ds_i}{dt} = 1 \quad\Longrightarrow\quad \frac{d}{dt}\sum_i \text{lag}_i = 0</div>
           <p>sleep 中的 task 兩邊都是 0，lag 不動，也不影響總和。一開始大家的 lag 都是 0，所以總和永遠是 0：有人多拿，就一定有人少拿。因此看圖時不能只看一條線，audio 往下多少，cc1 和 cc2 合起來就往上多少。<a class="chref" data-ref="eevdf"></a>會看到，EEVDF 的 <span class="tex">V</span> 正是靠這個性質算出來的。</p>
         </details>
+        <template lang="en">
+        <p>Ideally, all tasks that want to run would advance "at the same time", each at its own rate, like water split between several pipes at once. This imaginary model is called GPS (Generalized Processor Sharing). Under GPS, after time <span class="tex">t</span>, the CPU time task <span class="tex">i</span> should have received is (assuming the set of runnable tasks does not change in that period)</p>
+        <div class="tex-block">S_i = \frac{w_i}{W}\, t</div>
+        <p>A real CPU can run only one task at a time, so the CPU scheduler can only let them take turns. Write <span class="tex">s_i</span> for the time task <span class="tex">i</span> actually received; the difference between the two is the lag:</p>
+        <div class="tex-block">\text{lag}_i = S_i - s_i</div>
+        <p>Positive lag means the CPU scheduler owes the task; negative lag means the task has taken more than its share. An example: three nice 0 tasks all want to run, and the CPU scheduler lets A run for 1ms straight. In that 1ms, GPS would give each task <span class="tex">\tfrac{1}{3}</span> ms:</p>
+        <table class="mini eq-ex">
+          <thead><tr><th>task</th><th><span class="tex">S_i</span> (GPS)</th><th><span class="tex">s_i</span> (actual)</th><th><span class="tex">\text{lag}_i = S_i - s_i</span></th></tr></thead>
+          <tbody>
+            <tr><td>A</td><td><span class="tex">\tfrac{1}{3}</span> ms</td><td>1 ms</td><td><span class="tex">-\tfrac{2}{3}</span> ms</td></tr>
+            <tr><td>B</td><td><span class="tex">\tfrac{1}{3}</span> ms</td><td>0</td><td><span class="tex">+\tfrac{1}{3}</span> ms</td></tr>
+            <tr><td>C</td><td><span class="tex">\tfrac{1}{3}</span> ms</td><td>0</td><td><span class="tex">+\tfrac{1}{3}</span> ms</td></tr>
+          </tbody>
+        </table>
+        <p>Then B runs for 1ms, then C. Every 1ms, the lag of the one running drops by <span class="tex">\tfrac{2}{3}</span> and the two waiting each gain <span class="tex">\tfrac{1}{3}</span>. At 3ms each of the three tasks has run for 1ms, exactly what GPS would have given, and all lags are back to 0.</p>
+        <figure class="dg">
+          <svg viewBox="0 0 640 250" role="img" aria-label="Lag of three tasks taking turns running 1ms each">
+            <text class="dg-n" x="100" y="27" text-anchor="end">A</text>
+            <text class="dg-n" x="100" y="45" text-anchor="end">B</text>
+            <text class="dg-n" x="100" y="63" text-anchor="end">C</text>
+            <rect class="dg-bar s1" x="110" y="16" width="160" height="14"/>
+            <rect class="dg-bar s2" x="270" y="34" width="160" height="14"/>
+            <rect class="dg-bar s3" x="430" y="52" width="160" height="14"/>
+            <text class="dg-s" x="20" y="80">Real CPU: one at a time</text>
+            <text class="dg-s" x="20" y="150">lag</text>
+            <text class="dg-s" x="104" y="94" text-anchor="end">+2/3</text>
+            <text class="dg-s" x="104" y="154" text-anchor="end">0</text>
+            <text class="dg-s" x="104" y="214" text-anchor="end">−2/3</text>
+            <line class="dg-axis" x1="110" x2="590" y1="150" y2="150"/>
+            <line class="dg-grid" x1="270" x2="270" y1="10" y2="220"/>
+            <line class="dg-grid" x1="430" x2="430" y1="10" y2="220"/>
+            <line class="dg-grid" x1="590" x2="590" y1="10" y2="220"/>
+            <polyline class="dg-lag s1" points="110,150 270,210 430,180 590,150"/>
+            <polyline class="dg-lag s2" points="110,150 270,120 430,180 590,150"/>
+            <polyline class="dg-lag s3" points="110,150 270,120 430,90 590,150"/>
+            <text class="dg-s" x="110" y="240" text-anchor="middle">0</text>
+            <text class="dg-s" x="270" y="240" text-anchor="middle">1ms</text>
+            <text class="dg-s" x="430" y="240" text-anchor="middle">2ms</text>
+            <text class="dg-s" x="590" y="240" text-anchor="middle">3ms</text>
+          </svg>
+          <figcaption>Top: who is on the CPU. Bottom: the three lag lines, same colours. The running task's line goes down with slope 2/3, the two waiting ones go up with slope 1/3; at any moment the three add up to 0.</figcaption>
+        </figure>
+        <p>The chart under each CPU scheduler on the Simulate page plots exactly this quantity. When reading it, tell short-term sawtooth apart from long-term drift: the sawtooth is an inevitable result of taking turns. Only a line that keeps going down and never comes back means that task is getting more than its fair share over the long run.</p>
+
+        <details class="deep">
+          <summary>Deeper: how GPS is defined when the set of runnable tasks changes</summary>
+          <p>The formula <span class="tex">S_i = \frac{w_i}{W} t</span> above assumes <span class="tex">W</span> is constant. The general definition is written as a rate: at time <span class="tex">\tau</span> the weights of all tasks that want to run add up to <span class="tex">W(\tau)</span>, and the rate at which task <span class="tex">i</span> receives CPU at that moment is</p>
+          <div class="tex-block">\frac{dS_i}{d\tau} = \begin{cases} \dfrac{w_i}{W(\tau)} & i \text{ runnable} \\[6pt] 0 & i \text{ asleep} \end{cases}</div>
+          <p>Integrating the rate from 0 to <span class="tex">t</span> gives <span class="tex">S_i(t)</span>, the CPU time GPS would have given <span class="tex">i</span> by time <span class="tex">t</span>. While a task sleeps GPS gives it nothing, so neither <span class="tex">S_i</span> nor <span class="tex">s_i</span> moves, and the lag stays at its value from before the sleep and continues from there on waking. This is a choice, not the only possible definition; <a class="chref" data-ref="tradeoff"></a> shows that CFS and v6.12 handle this differently.</p>
+        </details>
+        <details class="deep">
+          <summary>Deeper: why a sawtooth, and how tall it can get</summary>
+          <p>Differentiate the definition with respect to time. GPS hands out CPU at rate <span class="tex">w_i / W</span>; a real CPU scheduler hands it out at rate 1 or 0, depending on whether the task is on the CPU. So for a runnable task the slope of the lag can take only two values:</p>
+          <div class="tex-block">\frac{d\,\text{lag}_i}{dt} = \frac{w_i}{W} - \frac{ds_i}{dt} = \begin{cases} \dfrac{w_i}{W} - 1 & i \text{ on the CPU} \\[6pt] \dfrac{w_i}{W} & i \text{ waiting} \end{cases}</div>
+          <p>With three nice 0 tasks <span class="tex">w_i / W = \tfrac{1}{3}</span>: the running one goes down with slope <span class="tex">-\tfrac{2}{3}</span>, the two waiting go up with slope <span class="tex">+\tfrac{1}{3}</span>. Each time a different task runs the slopes flip, so every line is made of straight segments.</p>
+          <p>How tall the sawtooth gets depends on how long the CPU scheduler lets one task run in one go. If a task runs for <span class="tex">q</span> straight, its lag drops by <span class="tex">q\,(1 - w_i/W)</span>. Two nice 0 tasks taking turns 10ms at a time swing by <span class="tex">10 \times \tfrac{1}{2} = 5</span> ms each time; at 1ms a turn the swing is only 0.5ms. As later chapters show, CFS lets a task run a whole stretch at once while EEVDF runs only one short slice at a time, so their sawtooth heights differ by an order of magnitude, and the EEVDF paper even proves bounds on lag (<a class="chref" data-ref="eevdf"></a>).</p>
+        </details>
+        <details class="deep">
+          <summary>Deeper: why all lags always add up to 0</summary>
+          <p>As long as some task wants to run, neither a real CPU scheduler nor GPS leaves the CPU idle, so over the same period both hand out the same total amount of CPU. Summing over all runnable tasks:</p>
+          <div class="tex-block">\sum_i \frac{dS_i}{dt} = \sum_i \frac{w_i}{W} = 1, \qquad \sum_i \frac{ds_i}{dt} = 1 \quad\Longrightarrow\quad \frac{d}{dt}\sum_i \text{lag}_i = 0</div>
+          <p>For a sleeping task both sides are 0, so its lag does not move and does not affect the sum. Everyone starts with lag 0, so the sum is always 0: if someone takes more, someone else gets less. That is why you cannot read one line on its own: however far audio goes down, cc1 and cc2 together go up by the same amount. <a class="chref" data-ref="eevdf"></a> shows that EEVDF's <span class="tex">V</span> is computed from exactly this property.</p>
+        </details>
+        </template>
       </article>
 
       <article class="card explain chapter" data-ch="o1" data-title="O(1)：優先權加時間片" data-q="不照比例分，只排先後順序，夠用嗎？">

@@ -32,7 +32,7 @@ export function mountLearn(): void {
     const i = main.findIndex((c) => c.id === a.dataset.ref);
     if (i < 0) throw new Error(`chref 指到不存在的章節：${a.dataset.ref}`);
     a.href = href(a.dataset.ref!);
-    a.textContent = tr(`第 ${i + 1} 章`, `chapter ${i + 1}`);
+    a.textContent = tr(`第 ${i + 1} 章`, `Chapter ${i + 1}`);
   }
 
   const toc = document.getElementById('learnToc')!;

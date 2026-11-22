@@ -15,7 +15,7 @@ const where = (s: string) => {
 
 /** 還沒翻的章節（翻完一章就從這裡拿掉） */
 const PENDING = new Set<string>([
-  'problem', 'weight', 'lag', 'o1', 'why-o1', 'cfs', 'why', 'eevdf', 'preempt', 'slice', 'tradeoff', 'recap', 'glossary',
+  'o1', 'why-o1', 'cfs', 'why', 'eevdf', 'preempt', 'slice', 'tradeoff', 'recap', 'glossary',
 ]);
 
 interface Article {
