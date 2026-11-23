@@ -1,6 +1,6 @@
 // 介面語言。中英文寫在同一處（tr('中文', 'English')），改其中一個時另一個就在旁邊，兩者要一起改。
 // 語言在載入時決定一次，切換時重新載入頁面，所以模組最上層的常數也可以直接用 tr()。
-// 優先順序：網址的 ?lang= → localStorage → 中文。測試可以先設 globalThis.__LANG__ 再載入模組。
+// 優先順序：網址的 ?lang= → localStorage → 英文。不在瀏覽器裡（測試）時預設中文；測試可以先設 globalThis.__LANG__ 再載入模組。
 
 export type Lang = 'zh' | 'en';
 
@@ -10,6 +10,7 @@ const isLang = (x: unknown): x is Lang => x === 'zh' || x === 'en';
 function detect(): Lang {
   const forced = (globalThis as { __LANG__?: unknown }).__LANG__;
   if (isLang(forced)) return forced;
+  if (typeof location === 'undefined') return 'zh';
   try {
     const q = new URLSearchParams(location.search).get('lang');
     if (isLang(q)) {
@@ -19,9 +20,9 @@ function detect(): Lang {
     const saved = localStorage.getItem(KEY);
     if (isLang(saved)) return saved;
   } catch {
-    // 不在瀏覽器裡（測試），或停用了儲存空間
+    // 停用了儲存空間
   }
-  return 'zh';
+  return 'en';
 }
 
 export const lang: Lang = detect();

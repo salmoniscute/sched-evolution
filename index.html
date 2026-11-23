@@ -4,6 +4,23 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>排程器演進模擬</title>
+    <!-- 避免英文模式先閃出中文：和 src/i18n.ts 的 detect() 用同樣的規則，是英文就先藏起頁面，applyLanguage() 換完才拿掉 class。3 秒保險，以免 JS 載入失敗時一直空白。 -->
+    <style>html.i18n-pending body { visibility: hidden; }</style>
+    <script>
+      (function () {
+        var l = null;
+        try {
+          l = new URLSearchParams(location.search).get('lang');
+          if (l !== 'zh' && l !== 'en') l = localStorage.getItem('sched-evolution:lang');
+        } catch (e) {}
+        if (l === 'zh') return;
+        var root = document.documentElement;
+        root.lang = 'en';
+        root.classList.add('i18n-pending');
+        document.title = 'CPU scheduler evolution';
+        setTimeout(function () { root.classList.remove('i18n-pending'); }, 3000);
+      })();
+    </script>
     <link rel="stylesheet" href="/src/ui/style.css" />
   </head>
   <body>

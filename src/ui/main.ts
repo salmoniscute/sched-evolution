@@ -889,6 +889,8 @@ function applyLanguage(): void {
   // 大段的內文（介紹頁、學習路線各章）：<article> 的最後一個子元素是 <template lang="en">，整篇換成英文版。
   // 要在小圖掛上去之前換，小圖的容器（id）兩個版本都有。
   for (const t of document.querySelectorAll<HTMLTemplateElement>('article > template[lang="en"]')) t.parentElement!.replaceChildren(t.content);
+  // index.html 的 head 在英文模式先藏起頁面（避免閃出中文），換完才顯示
+  document.documentElement.classList.remove('i18n-pending');
 }
 
 // ---- 分頁（#/intro、#/learn/<章>、#/sim、#/source）

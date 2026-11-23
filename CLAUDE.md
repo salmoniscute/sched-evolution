@@ -38,7 +38,7 @@ RSDL/SD/BFS（Con Kolivas）只在歷史說明中提到，不實作。v2.6.23 �
 
 ## 介面語言（中英並列）
 
-- 網頁有中英兩種語言，右上角切換（網址 `?lang=en`，記在 localStorage）。切換時重新載入，模組在載入時決定語言。
+- 網頁有中英兩種語言，右上角切換（預設英文；網址 `?lang=zh` / `?lang=en`，記在 localStorage）。切換時重新載入，模組在載入時決定語言。
 - **改任何讀者看得到的文字時，中英文一起改。** 程式裡用 `tr('中文', 'English')`（`src/i18n.ts`），兩種寫在同一處；`index.html` 的固定文字把英文寫在 `data-en`、`data-en-title`、`data-en-aria`。名詞表每個條目有 `zh` / `en` 兩份。
 - 大段內文（介紹頁、學習路線每一章）：每個 `<article>` 的最後一個子元素是 `<template lang="en">`，放整篇的英文版，英文模式載入時在小圖掛上去之前整篇換掉。章名與引導問題的英文寫在 `data-title-en` / `data-q-en`。改中文段落時，同一個 article 結尾的英文對應段落也要改。
 - `test/i18n-html.test.ts`：每個 article 都要有英文版且沒有中文；中英兩版的 id、`data-sim` 標記、章節引用、外部連結、公式與 details／figure／table 的數量要一致；`index.html` 其他固定文字要有 `data-en`；小圖與原始碼頁（`src/ui/` 的 `start.ts`、`o1-widgets.ts` 等）的中文字串都要在 `tr()` 的第一個參數裡。英文裡的章節引用顯示為 “Chapter N”。
