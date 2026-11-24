@@ -8,6 +8,7 @@ import { scenarios, type Scenario } from '../scenarios.ts';
 import { changedFlags, DEFAULT_COMPARE, defaultFlags, variants, type Flags, type SchedVariant } from '../variants.ts';
 import { gap, isEn, joinList, setLang, tr } from '../i18n.ts';
 import { installCodeChips } from './code-chips.ts';
+import { installFeedback } from './feedback.ts';
 import { renderMathIn } from './math.ts';
 import { glossaryHtml, installTooltips, linkTermsIn, term } from './glossary.ts';
 import { latestAtOrBefore, latestForPid, renderDecision, type InspectCtx } from './inspect.ts';
@@ -937,6 +938,14 @@ mountEevdfWidgets();
 mountCostWidget();
 mountLearn();
 installTooltips();
+// 回饋連結：在模擬頁時附上情境、比較的排程器與關掉的開關（issue 一律英文，用 id）
+installFeedback(() => {
+  if (!location.hash.startsWith('#/sim')) return [];
+  return [
+    `Scenario: \`${scenarioSel.value}\``,
+    `Compared: ${data.runs.map((r) => `\`${r.def.id}\`` + (r.changed.length ? ` (off: ${r.changed.join(', ')})` : '')).join(', ')}`,
+  ];
+});
 renderMathIn();
 installCodeChips();
 scenarioSel.addEventListener('change', rebuild);

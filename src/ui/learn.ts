@@ -1,6 +1,7 @@
 // 學習路線（#/learn/<章>）：一次只顯示一章，左邊章節目錄，底下上一章／下一章。
 // 章節的標題與問題寫在 index.html 每個 <article class="chapter"> 的 data-title / data-q（英文是 data-title-en / data-q-en）。
 import { isEn, tr } from '../i18n.ts';
+import { feedbackLink } from './feedback.ts';
 
 interface Chapter {
   id: string;
@@ -66,6 +67,11 @@ export function mountLearn(): void {
         ? `<a class="ch-next" href="${href(next.id)}"><span>${tr('下一章 →', 'Next →')}</span><b>${next.title}</b></a>`
         : `<a class="ch-next" href="#/sim"><span>${tr('讀完了 →', 'Done →')}</span><b>${tr('到模擬頁把各代 CPU scheduler 並排比較', 'Compare the CPU schedulers side by side on the Simulate page')}</b></a>`);
     c.el.append(foot);
+
+    const fb = document.createElement('p');
+    fb.className = 'ch-feedback';
+    fb.append(tr('這一章有看不懂或寫錯的地方？', 'Anything in this chapter unclear or wrong?'), ' ', feedbackLink(tr('到 GitHub 開 issue', 'Open an issue on GitHub')));
+    c.el.append(fb);
   });
 
   mountReasons();

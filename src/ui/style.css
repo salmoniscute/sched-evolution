@@ -140,6 +140,7 @@ th:first-child, td:first-child { text-align: left; }
 th { color: var(--muted); font-weight: 500; }
 .swatch { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; }
 footer { font-size: 12px; padding-bottom: 24px; }
+.ch-feedback { margin: 14px 0 0; font-size: 13px; color: var(--muted); text-align: center; }
 code { font-size: 12px; }
 
 /* 行內程式碼：依種類上色（src/ui/code-chips.ts 加上 data-kind） */
